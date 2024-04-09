@@ -586,3 +586,18 @@ class HITLManager:
             matches_by_text[graph["text"]]["triplets"] = triplets
 
         return matches_by_text
+
+    def generalise_graphs(self):
+        # generalisation process: transform hyperedges into abstract patterns
+        # step 1: access hyperedges in hitl
+        graph = self.parsed_graphs
+
+        # step 2: add classifier and cases
+        assert self.extractor.classifier is not None, "classifier not initialized"
+
+        try:
+            # test graphbrain functions
+            self.extractor.classifier.generalize()  # has been recognized!
+        except:
+            print("not working")
+        return print("Work in progress.")

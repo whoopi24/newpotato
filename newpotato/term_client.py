@@ -204,11 +204,36 @@ class NPTerminalClient:
                 else:
                     get_triplets_from_user(sen, self.hitl, console)
 
+    def execute_oie(self):
+
+        if self.hitl.parsed_graphs == {}:
+            console.print(
+                "[bold red]That choice requires parsed sentences, run (S)entence or (U)pload first![/bold red]"
+            )
+        else:
+            # step 1: generalisation process: transform hyperedges into abstract patterns
+            # step 1.a: access hyperedges in hitl -> self.hitl.parsed_graphs
+            for sen, graph in self.hitl.parsed_graphs.items():
+                print(sen, str(graph["main_edge"]))
+                break
+
+            # self.hitl.generalise_graphs()
+
+            # step 2: handle special cases
+
+            # step 3: take 50 most common of these patterns
+
+            # step 4: pattern learning + annotation guidelines
+
+            # step 5: compress these patterns in more general ones
+
+        return print("Work in progress.")
+
     def run(self):
         while True:
             self.print_status()
             console.print(
-                "[bold cyan]Choose an action:\n\t(S)entence\n\t(U)pload\n\t(G)raphs\n\t(A)nnotate\n\t(T)riplets\n\t(R)ules\n\t(I)nference\n\t(E)valuate\n\t(L)oad\n\t(W)rite\n\t(C)lear\n\t(Q)uit\n\t(H)elp[/bold cyan]"
+                "[bold cyan]Choose an action:\n\t(S)entence\n\t(U)pload\n\t(G)raphs\n\t(A)nnotate\n\t(T)riplets\n\t(R)ules\n\t(I)nference\n\t(E)valuate\n\t(L)oad\n\t(W)rite\n\t(C)lear\n\t(Q)uit\n\t(H)elp\n\t(O)pen Information Extraction[/bold cyan]"
             )
             choice = input("> ").upper()
             if choice in ("T", "I") and self.hitl.extractor.classifier is None:
@@ -240,6 +265,8 @@ class NPTerminalClient:
             elif choice == "Q":
                 console.print("[bold red]Exiting...[/bold red]")
                 break
+            elif choice == "O":
+                self.execute_oie()
             elif choice == "H":
                 console.print(
                     "[bold cyan]Help:[/bold cyan]\n"
@@ -255,6 +282,7 @@ class NPTerminalClient:
                     + "\t(C)lear: Clear the console\n"
                     + "\t(Q)uit: Exit the program\n"
                     + "\t(H)elp: Show this help message\n"
+                    + "\t(O)pen Information Extraction: Transform hyperedges into abstract patterns\n"
                 )
 
             else:
