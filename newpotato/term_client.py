@@ -211,21 +211,7 @@ class NPTerminalClient:
                 "[bold red]That choice requires parsed sentences, run (S)entence or (U)pload first![/bold red]"
             )
         else:
-            # step 1: generalisation process: transform hyperedges into abstract patterns
-            # step 1.a: access hyperedges in hitl -> self.hitl.parsed_graphs
-            for sen, graph in self.hitl.parsed_graphs.items():
-                print(sen, str(graph["main_edge"]))
-                break
-
-            # self.hitl.generalise_graphs()
-
-            # step 2: handle special cases
-
-            # step 3: take 50 most common of these patterns
-
-            # step 4: pattern learning + annotation guidelines
-
-            # step 5: compress these patterns in more general ones
+            common_patterns = self.hitl.generalise_graphs()
 
         return print("Work in progress.")
 
