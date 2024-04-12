@@ -6,10 +6,14 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
+from graphbrain import hgraph
 from graphbrain.hyperedge import Hyperedge
+
+# from graphbrain.hypergraph import Hypergraph
 from graphbrain.learner.classifier import Classifier
 from graphbrain.learner.classifier import from_json as classifier_from_json
 from graphbrain.learner.rule import Rule
+from graphbrain.patterns import PatternCounter
 
 from newpotato.datatypes import GraphParse, Triplet
 from newpotato.parser import TextParserClient
@@ -587,17 +591,33 @@ class HITLManager:
 
         return matches_by_text
 
-    def generalise_graphs(self):
-        # generalisation process: transform hyperedges into abstract patterns
-        # step 1: access hyperedges in hitl
-        graph = self.parsed_graphs
+    def generalise_graph(self):
 
-        # step 2: add classifier and cases
-        assert self.extractor.classifier is not None, "classifier not initialized"
+        # step 1: transform hyperedges into abstract patterns
 
-        try:
-            # test graphbrain functions
-            self.extractor.classifier.generalize()  # has been recognized!
-        except:
-            print("not working")
-        return print("Work in progress.")
+        # hg = Hypergraph()  # not implemented error: _add()
+        hg = hgraph("oie.hg")
+        pc = PatternCounter(expansions={"(*/P * *)", "(*/P * * *)"})
+        for sen, graph in self.parsed_graphs.items():
+            edge = graph["main_edge"]
+            hg.add(edge)
+
+        iter = 0
+        for edge in hg.all():
+            iter += 1
+            if hg.is_primary(edge):
+                pc.count(edge)
+
+        print(iter)
+
+        # step 2: handle special cases
+
+        # step 3: take 50 most common of these patterns
+        common_patterns = pc.patterns.most_common(50)
+        print(common_patterns)
+
+        # step 4: pattern learning + annotation guidelines
+
+        # step 5: compress these patterns in more general ones
+
+        return common_patterns
