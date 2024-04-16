@@ -5,6 +5,7 @@ import graphbrain.patterns as pattrn
 from graphbrain import *
 from graphbrain.hyperedge import UniqueAtom, hedge
 from graphbrain.parsers import *
+from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 
 # The 10 patterns that are shown in Table 4 and discussed in section 4.2.
 # PATTERNS = [
@@ -47,82 +48,78 @@ def label(edge, atom2word):
 
 
 # Conjunction resolution, as discussed in section 4.1
-def conjunctions_resolution(edge, atom2word):
-    if edge.is_atom():
-        return []
+# def conjunctions_resolution(edge, atom2word):
+#     if edge.is_atom():
+#         return []
 
-    if edge[0].type() == "J" and edge.type()[0] == "R":
-        cur_subj = None
-        cur_pred = None
-        cur_role = None
-        edges = []
-        no_obj_edges = []
-        for subedge in edge[1:]:
-            subj = subedge.edges_with_argrole("s")
-            passive = subedge.edges_with_argrole("p")
-            newedge = subedge
+#     if edge[0].type() == "J" and edge.type()[0] == "R":
+#         cur_subj = None
+#         cur_pred = None
+#         cur_role = None
+#         edges = []
+#         no_obj_edges = []
+#         for subedge in edge[1:]:
+#             subj = subedge.edges_with_argrole("s")
+#             passive = subedge.edges_with_argrole("p")
+#             newedge = subedge
 
-            if (len(subj) > 0 or len(passive) > 0) and len(subedge) == 2:
-                no_obj_edges.append(subedge)
+#             if (len(subj) > 0 or len(passive) > 0) and len(subedge) == 2:
+#                 no_obj_edges.append(subedge)
 
-            if len(subj) > 0 and subj[0] is not None:
-                cur_subj = subj[0]
-                cur_pred = subedge[0]
-                cur_role = "s"
-            elif len(passive) > 0 and passive[0] is not None:
-                cur_subj = passive[0]
-                cur_pred = subedge[0]
-                cur_role = "p"
-            elif (
-                cur_subj is not None
-                and subedge.type()[0] == "R"
-                and subedge[0].type() != "J"
-            ):
-                newedge = hedge(
-                    [
-                        cur_pred.replace_atom(
-                            cur_pred.predicate(), subedge[0].predicate()
-                        )
-                    ]
-                ) + hedge(subedge[1:])
-                old_pred = newedge.predicate()
-                newedge = newedge.insert_edge_with_argrole(cur_subj, cur_role, 0)
-                new_pred = newedge.predicate()
-                if old_pred and new_pred:
-                    old_pred_u = UniqueAtom(old_pred)
-                    new_pred_u = UniqueAtom(new_pred)
-                    atom2word[new_pred_u] = atom2word[old_pred_u]
-            new_edges = conjunctions_resolution(newedge, atom2word)
-            edges += new_edges
-        return edges
+#             if len(subj) > 0 and subj[0] is not None:
+#                 cur_subj = subj[0]
+#                 cur_pred = subedge[0]
+#                 cur_role = "s"
+#             elif len(passive) > 0 and passive[0] is not None:
+#                 cur_subj = passive[0]
+#                 cur_pred = subedge[0]
+#                 cur_role = "p"
+#             elif (
+#                 cur_subj is not None
+#                 and subedge.type()[0] == "R"
+#                 and subedge[0].type() != "J"
+#             ):
+#                 newedge = hedge(
+#                     [cur_pred.replace_atom(predicate(cur_pred), predicate(subedge[0]))]
+#                 ) + hedge(subedge[1:])
+#                 old_pred = predicate(newedge)
+#                 newedge = newedge.insert_edge_with_argrole(cur_subj, cur_role, 0)
+#                 new_pred = predicate(newedge)
+#                 if old_pred and new_pred:
+#                     old_pred_u = UniqueAtom(old_pred)
+#                     new_pred_u = UniqueAtom(new_pred)
+#                     atom2word[new_pred_u] = atom2word[old_pred_u]
+#             new_edges = conjunctions_resolution(newedge, atom2word)
+#             edges += new_edges
+#         return edges
 
-    for pos, subedge in enumerate(edge):
-        if not subedge.is_atom():
-            if (
-                subedge[0].type() == "J"
-                and subedge[0].to_str()[0] != ":"
-                and subedge.type()[0] == "C"
-            ):
-                edges = []
-                for list_item in subedge[1:]:
-                    subedges = conjunctions_resolution(hedge([list_item]), atom2word)
-                    for se in subedges:
-                        newedge = hedge(edge[0:pos]) + se + hedge(edge[pos + 1 :])
-                        edges.append(newedge)
-                return edges
-            else:
-                subedges = conjunctions_resolution(subedge, atom2word)
-                if len(subedges) > 1:
-                    edges = []
-                    for list_item in subedges:
-                        newedge = (
-                            hedge(edge[0:pos])
-                            + hedge([list_item])
-                            + hedge(edge[pos + 1 :])
-                        )
-                        edges.append(newedge)
-                    return edges
-    return [edge]
+#     for pos, subedge in enumerate(edge):
+#         if not subedge.is_atom():
+#             if (
+#                 subedge[0].type() == "J"
+#                 and subedge[0].to_str()[0] != ":"
+#                 and subedge.type()[0] == "C"
+#             ):
+#                 edges = []
+#                 for list_item in subedge[1:]:
+#                     subedges = conjunctions_resolution(hedge([list_item]), atom2word)
+#                     for se in subedges:
+#                         newedge = hedge(edge[0:pos]) + se + hedge(edge[pos + 1 :])
+#                         edges.append(newedge)
+#                 return edges
+#             else:
+#                 subedges = conjunctions_resolution(subedge, atom2word)
+#                 if len(subedges) > 1:
+#                     edges = []
+#                     for list_item in subedges:
+#                         newedge = (
+#                             hedge(edge[0:pos])
+#                             + hedge([list_item])
+#                             + hedge(edge[pos + 1 :])
+#                         )
+#                         edges.append(newedge)
+#                     return edges
+#     return [edge]
 
 
 def main_conjunction(edge):
@@ -153,7 +150,6 @@ def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
 def find_tuples(extractions, edge, sent_id, atom2word):
     for pattern in PATTERNS:
         for match in pattrn.match_pattern(edge, pattern):
-            print(match)
             arg1 = match["ARG1"]
             arg2 = match["ARG2"]
             if "ARG3..." in match:
@@ -181,7 +177,8 @@ def information_extraction(extractions, main_edge, sent_id, atom2word):
     if main_edge.is_atom():
         return
     if main_edge.type()[0] == "R":
-        edges = conjunctions_resolution(main_edge, atom2word)
+        # edges = conjunctions_resolution(main_edge, atom2word)
+        edges = conjunctions_decomposition(main_edge)
         for edge in edges:
             find_tuples(extractions, main_conjunction(edge), sent_id, atom2word)
     for edge in main_edge:
@@ -205,6 +202,7 @@ if __name__ == "__main__":
     extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
 
     for key in manual:
+        print(key)
         for case in manual[key]:
             parse_sent(extractions, parser, case["sent"], case["id"])
 
