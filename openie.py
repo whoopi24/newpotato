@@ -178,7 +178,7 @@ def information_extraction(extractions, main_edge, sent_id, atom2word):
         return
     if main_edge.type()[0] == "R":
         # edges = conjunctions_resolution(main_edge, atom2word)
-        edges = conjunctions_decomposition(main_edge)
+        edges = conjunctions_decomposition(main_edge, concepts=True)
         for edge in edges:
             find_tuples(extractions, main_conjunction(edge), sent_id, atom2word)
     for edge in main_edge:
@@ -198,16 +198,18 @@ if __name__ == "__main__":
     parser = create_parser(lang="en", corefs=False)
     extractions = {}
 
-    manual = json.load(open("{}/{}".format(DIR, EXTR_MANUAL)))
-    extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
+    parse_sent(extractions, parser, "Mary likes astronomy and plays football.", "MY1")
 
-    for key in manual:
-        print(key)
-        for case in manual[key]:
-            parse_sent(extractions, parser, case["sent"], case["id"])
+    # manual = json.load(open("{}/{}".format(DIR, EXTR_MANUAL)))
+    # extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
 
-    for _, extraction in extractions.items():
-        extr[extraction["sent_id"]].append(extraction["data"])
+    # for key in manual:
+    #     print(key)
+    #     for case in manual[key]:
+    #         parse_sent(extractions, parser, case["sent"], case["id"])
 
-    with open("{}/{}".format(DIR, EXTR_AFTER), "w", encoding="utf-8") as f:
-        json.dump(extr, f, ensure_ascii=False, indent=4)
+    # for _, extraction in extractions.items():
+    #     extr[extraction["sent_id"]].append(extraction["data"])
+
+    # with open("{}/{}".format(DIR, EXTR_AFTER), "w", encoding="utf-8") as f:
+    #     json.dump(extr, f, ensure_ascii=False, indent=4)
