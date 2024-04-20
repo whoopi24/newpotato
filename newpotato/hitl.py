@@ -12,8 +12,10 @@ from graphbrain.hyperedge import Hyperedge
 # from graphbrain.hypergraph import Hypergraph
 from graphbrain.learner.classifier import Classifier
 from graphbrain.learner.classifier import from_json as classifier_from_json
+from graphbrain.learner.pattern_ops import *
 from graphbrain.learner.rule import Rule
 from graphbrain.patterns import PatternCounter
+from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 
 from newpotato.datatypes import GraphParse, Triplet
 from newpotato.parser import TextParserClient
@@ -596,28 +598,55 @@ class HITLManager:
         # step 1: transform hyperedges into abstract patterns
 
         # hg = Hypergraph()  # not implemented error: _add()
-        hg = hgraph("oie.hg")
-        pc = PatternCounter(expansions={"(*/P * *)", "(*/P * * *)"})
-        for sen, graph in self.parsed_graphs.items():
-            edge = graph["main_edge"]
-            hg.add(edge)
-
+        # hg = hgraph("oie.hg")
+        pc = PatternCounter(
+            expansions={
+                "(*/T */R)",
+                "(*/T */C)",
+                "(* * *)",
+                # not working:
+                # "(+/B.am * *)",
+                # "(+/B.ma * *)",
+                # "(+/B.mm * *)",
+                # "(+/B * *)",
+                "(* * * *)",
+            }
+        )
         iter = 0
-        for edge in hg.all():
-            iter += 1
-            if hg.is_primary(edge):
-                pc.count(edge)
+        for _, graph in self.parsed_graphs.items():
+            edge = graph["main_edge"]
+            # exclusion of conjunctions
+            edges = conjunctions_decomposition(edge, concepts=True)
+            for e in edges:
+                iter += 1
+                pc.count(e)
 
         print(iter)
 
-        # step 2: handle special cases
+        # step 2: summaries patterns
 
         # step 3: take 50 most common of these patterns
-        common_patterns = pc.patterns.most_common(50)
-        print(common_patterns)
+        patterns = pc.patterns.most_common(50)
+        print(patterns)
+        sum_patterns = []
+        for p1, _ in patterns:
+            for p2, _ in patterns:
+                if p1 == p2:
+                    continue
+                comm = common_pattern(hedge(p1), hedge(p2))
+                if len(sum_patterns) > 0:
+                    for p3 in sum_patterns:
+                        comm = common_pattern(hedge(comm), hedge(p3))
+                        if comm not in sum_patterns:
+                            sum_patterns.append(comm)
+                else:
+                    if comm not in sum_patterns:
+                        sum_patterns.append(comm)
+
+        print(sum_patterns)
 
         # step 4: pattern learning + annotation guidelines
 
         # step 5: compress these patterns in more general ones
 
-        return common_patterns
+        return patterns
