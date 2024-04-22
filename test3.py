@@ -12,6 +12,8 @@ def common_char(str1, str2):
 
 # copied from: https://stackoverflow.com/questions/71732405/splitting-words-by-whitespace-without-affecting-brackets-content-using-regex
 def split_pattern(s):
+    s = str(s)
+    print("split: " + s)
     result = []
     brace_depth = 0
     temp = ""
@@ -30,17 +32,18 @@ def split_pattern(s):
             temp += ch
     if temp != "":
         result.append(temp[:])
+    print("into: ", result)
     return result
 
 
-parser = create_parser(lang="en")
-# text = """
-# In 2007 , member states agreed that , in the future , 20 % of the energy used across the EU must be renewable ,
-# and carbon dioxide emissions have to be lower in 2020 by at least 20 % compared to 1990 levels.
-# """
+# parser = create_parser(lang="en")
 text = """
-Between the three of them, during their training with Bruce, they won every karate championship in the United States. 
+In 2007 , member states agreed that , in the future , 20 % of the energy used across the EU must be renewable ,
+and carbon dioxide emissions have to be lower in 2020 by at least 20 % compared to 1990 levels.
 """
+# text = """
+# Between the three of them, during their training with Bruce, they won every karate championship in the United States.
+# """
 pc = PatternCounter(
     expansions={
         "(*/T */R)",
@@ -54,28 +57,30 @@ pc = PatternCounter(
     }
 )
 
-# +/B.am/.  bzw. +/B/. bzw. +/B.mm/. bzw. +/B.ma/.
-parse_results = parser.parse(text)
-for parse in parse_results["parses"]:
-    edges = conjunctions_decomposition(parse["main_edge"], concepts=True)
-    for e in edges:
-        pc.count(e)
+# # +/B.am/.  bzw. +/B/. bzw. +/B.mm/. bzw. +/B.ma/.
+# parse_results = parser.parse(text)
+# for parse in parse_results["parses"]:
+#     edges = conjunctions_decomposition(parse["main_edge"], concepts=True)
+#     for e in edges:
+#         pc.count(e)
 
 # print(pc.patterns.most_common(10))
 
-for p, cnt in pc.patterns.most_common(10):
-    print(p)
+# for p, cnt in pc.patterns.most_common(10):
+#     print(p)
 
-# edge1 = "(*/P.sxr */C.ma */S */S)"
-# edge2 = "(*/P.sxr */C.mm */S */S)"
+edge1 = "(*/P.sor */C.ma */S */S)"
+edge2 = "(*/P.sxr */C.mm */S */S)"
 
-edge1 = "(*/B.ma */C */C)"
-edge2 = "(*/B.mm */C */C)"
+
+# edge1 = "(*/B.ma */C */C)"
+# edge2 = "(*/B.mm */C */C)"
 # edge1 = "(*/T */C)"
-# edge2 = "(*/T (*/B.ma */C */C))"
+# edge1 = "(*/T (*/B.ma */C */C))"
+# edge2 = "(*/T (*/B.mm */C */C))"
 
 comm = common_pattern(hedge(edge1), hedge(edge2))
-print(comm)
+# print(comm)
 # (*/P.{sxr} */C */S */S), (*/P.{so} */S */S),
 # (*/B.{m} */C) -> not correct !!
 
@@ -90,42 +95,69 @@ def compare_pattern(edge1, edge2):
         for i in range(0, len(e1)):
             s1 = e1[i]
             s2 = e2[i]
-            print(i)
+            # print(i)
             print(s1, s2)
+            print(s1[:3], s2[:3])
             if s1 == s2:
+                print("equal")
                 final.append(s1)
-            elif common_char(s1, s2) > 2:
+            elif s1.count(" ") == s2.count(" ") and s1.count(" ") > 0:
+                print("recursion")
+                s3 = compare_pattern(s1, s2)
+                final.append("".join(s3))  # type: ignore
+            elif s1[:3] == s2[:3]:  # common_char(s1, s2) > 2 and len(s1) == len(s2):
                 print("common characters")
-                if s1.count(" ") > 0:
-                    s1 = split_pattern(s1)
-                    print(s1)
-                else:
-                    s1 = [s1]
-                if s2.count(" ") > 0:
-                    s2 = split_pattern(s2)
-                    print(s2)
-                else:
-                    s2 = [s2]
-                if len(s1) != len(s2):
-                    print("cannot compress pattern")
-                    return None
-                else:
-                    print(s1)
-                    if len(s1) == 1:
-
-                    # ToDo: compare each character (not nested for loop)
-                s3 = "tbd"
-                final.append(s3)
+                s3 = []
+                iter = 0
+                # compare each character of the string
+                for k, l in zip(s1, s2):
+                    if iter < 4:
+                        iter += 1
+                        s3.append(k)
+                    elif k == l:
+                        s3.append(k)
+                    else:
+                        print("compressed")
+                        s3.append("[" + k + l + "]")
+                final.append("".join(s3))
             else:
                 print("cannot compress pattern")
-                return None
-
+                return edge1
+        print(final, type(final))
+        final = "(" + " ".join(final) + ")"
         return final
+    else:
+        print("patterns have unequal length")
+        return edge1
 
 
-result = compare_pattern(edge1, edge2)
-print("result: ", result)
+# result = compare_pattern(edge1, edge2)
+# print("result: ", result)
 
 # (won/Pd.xxso.<f-----/en (between/T/en (of/Br.ma/en (the/Md/en three/C#/en) them/Ci/en)) (during/T/en (with/Br.ma/en (their/Mp/en training/Cc.s/en) bruce/Cp.s/en)) they/Ci/en (in/Br.ma/en (every/Md/en
 # (+/B.am/. karate/Cc.s/en championship/Cc.s/en)) (the/Md/en (+/B.am/. united/Cp.s/en states/Cp.s/en))))
 # (+/B.am/. karate/Cc.s/en championship/Cc.s/en)) (the/Md/en (+/B.am/. united/Cp.s/en states/Cp.s/en))))
+
+mylist = []
+compressed = []
+# for p, _ in pc.patterns.most_common(10):
+#     mylist.append(p)
+mylist = [
+    "(*/B.ma */C */C)",
+    "(*/T */C)",
+    "(*/T */C.ma)",
+    "(*/B.mm */C */C)",
+    "(*/B.ma */C */C.ma)",
+    # "(*/T (*/B.ma */C */C))",
+    # "(*/B.ma */C.ma */C)",
+    # "(*/B.ma (*/B.ma */C */C) */C)",
+    # "(*/B.ma */C */C.mm)",
+    # "(*/P.so */C */C.ma)",
+    # "(*/B.mm */C */C.ma)",
+]
+for i in range(len(mylist)):
+    for j in range(i + 1, len(mylist)):
+        print(mylist[i], mylist[j])
+        res = compare_pattern(mylist[i], mylist[j])
+        compressed.append(res)
+print("result: ", set(compressed))
