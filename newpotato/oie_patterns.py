@@ -8,11 +8,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
 
 
-# copied from: https://www.geeksforgeeks.org/python-count-the-number-of-matching-characters-in-a-pair-of-string/
-def common_char(str1, str2):
-    return len((set(str1)).intersection(set(str2)))
-
-
 # copied from: https://stackoverflow.com/questions/71732405/splitting-words-by-whitespace-without-affecting-brackets-content-using-regex
 def split_pattern(s):
     string = str(s)
@@ -36,49 +31,6 @@ def split_pattern(s):
         result.append(temp[:])
     logger.debug(f"split {s} into {result}")
     return result
-
-
-def compare_patterns(edge1, edge2):
-    e1 = split_pattern(edge1)
-    e2 = split_pattern(edge2)
-    if len(e1) == len(e2):
-        logger.debug(f"patterns have equal length")
-        final = []
-        for i in range(0, len(e1)):
-            s1 = e1[i]
-            s2 = e2[i]
-            # print(s1, s2)
-            if s1 == s2:
-                final.append(s1)
-            elif s1.count(" ") == s2.count(" ") and s1.count(" ") > 0:
-                logger.debug(f"recursion needed")
-                s3 = compare_patterns(s1, s2)
-                final.append("".join(s3))  # type: ignore
-            elif s1[:3] == s2[:3]:
-                logger.debug(f"patterns have common characters")
-                # compare each character of the string
-
-                # ToDo
-                s3 = []
-                iter = 0
-                for k, l in zip(s1, s2):
-                    if iter < 4:
-                        iter += 1
-                        s3.append(k)
-                    elif k == l:
-                        s3.append(k)
-                    else:
-                        logger.debug(f"patterns were compressed")
-                        s3.append("[" + k + l + "]")
-                final.append("".join(s3))
-            else:
-                logger.debug(f"patterns cannot be compressed")
-                return None
-        final = "(" + " ".join(final) + ")"
-        return final
-    else:
-        logger.debug(f"patterns have unequal length")
-        return None
 
 
 def _simplify_patterns(edge):
@@ -121,6 +73,52 @@ def simplify_patterns(mylist):
     return simplifed_patterns
 
 
+def compare_patterns(edge1, edge2):
+    e1 = split_pattern(edge1)
+    e2 = split_pattern(edge2)
+    if len(e1) == len(e2):
+        logger.debug(f"patterns have equal length")
+        final = []
+        for i in range(0, len(e1)):
+            s1 = e1[i]
+            s2 = e2[i]
+            # print(s1, s2)
+            if s1 == s2:
+                final.append(s1)
+            elif s1.count(" ") == s2.count(" ") and s1.count(" ") > 0:
+                logger.debug(f"recursion needed")
+                s3 = compare_patterns(s1, s2)
+                final.append("".join(s3))  # type: ignore
+            elif s1.count(" ") > 0 or s2.count(" ") > 0:
+                logger.debug(f"patterns cannot be compressed")
+                return None
+            elif s1[:3] == s2[:3]:
+                logger.debug(f"patterns have common characters")
+                # compare each character of the string
+
+                # ToDo
+                s3 = []
+                iter = 0
+                for k, l in zip(s1, s2):
+                    if iter < 4:
+                        iter += 1
+                        s3.append(k)
+                    elif k == l:
+                        s3.append(k)
+                    else:
+                        logger.debug(f"patterns were compressed")
+                        s3.append("[" + k + l + "]")
+                final.append("".join(s3))
+            else:
+                logger.debug(f"patterns cannot be compressed")
+                return None
+        final = "(" + " ".join(final) + ")"
+        return final  # hedge(final) not possible because of recursion
+    else:
+        logger.debug(f"patterns have unequal length")
+        return None
+
+
 def compress_patterns(mylist):
     # initializations
     mydict = {}
@@ -144,7 +142,7 @@ def compress_patterns(mylist):
             if res is not None:
                 res = hedge(res)
                 logger.debug(f"Compression found: {res}")
-                compressed[res] = mydict.get(res, 0) + mydict[key2]
+                compressed[res] = mydict.get(res, 0) + mydict[key] + mydict[key2]
                 used_keys.append(key)
                 used_keys.append(key2)
                 comp_tf = True
