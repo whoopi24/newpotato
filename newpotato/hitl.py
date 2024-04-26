@@ -593,60 +593,56 @@ class HITLManager:
 
         return matches_by_text
 
-    def generalise_graph(self):
+    def generalise_graph(self, top_n=50):
 
-        # step 1: transform hyperedges into abstract patterns
-
-        # hg = Hypergraph()  # not implemented error: _add()
-        # hg = hgraph("oie.hg")
+        # transform hyperedges into abstract patterns
         pc = PatternCounter(
             expansions={
                 "(*/T */R)",
                 "(*/T */C)",
                 "(* * *)",
+                "(* * * *)",
                 # not working:
                 # "(+/B.am * *)",
                 # "(+/B.ma * *)",
                 # "(+/B.mm * *)",
                 # "(+/B * *)",
-                "(* * * *)",
             }
         )
-        iter = 0
+
         for _, graph in self.parsed_graphs.items():
             edge = graph["main_edge"]
             # exclusion of conjunctions
             edges = conjunctions_decomposition(edge, concepts=True)
             for e in edges:
-                iter += 1
                 pc.count(e)
 
-        print(iter)
+        return pc.patterns.most_common(top_n)
 
-        # step 2: summaries patterns
+    # def compress_patterns(self, patterns: list) -> list:
+    #     # step 2: summaries patterns
+    #     print(patterns)
+    #     comp_patterns = []
+    #     for p1, _ in patterns:
+    #         for p2, _ in patterns:
+    #             if p1 == p2:
+    #                 continue
+    #             comm = common_pattern(hedge(p1), hedge(p2))
+    #             if len(comp_patterns) > 0:
+    #                 for p3 in comp_patterns:
+    #                     comm = common_pattern(hedge(comm), hedge(p3))
+    #                     if comm not in comp_patterns:
+    #                         comp_patterns.append(comm)
+    #             else:
+    #                 if comm not in comp_patterns:
+    #                     comp_patterns.append(comm)
 
-        # step 3: take 50 most common of these patterns
-        patterns = pc.patterns.most_common(50)
-        print(patterns)
-        sum_patterns = []
-        for p1, _ in patterns:
-            for p2, _ in patterns:
-                if p1 == p2:
-                    continue
-                comm = common_pattern(hedge(p1), hedge(p2))
-                if len(sum_patterns) > 0:
-                    for p3 in sum_patterns:
-                        comm = common_pattern(hedge(comm), hedge(p3))
-                        if comm not in sum_patterns:
-                            sum_patterns.append(comm)
-                else:
-                    if comm not in sum_patterns:
-                        sum_patterns.append(comm)
+    #     print(comp_patterns)
 
-        print(sum_patterns)
+    #     # step 3: take 50 most common of these patterns
+    #     comp_patterns = comp_patterns[:50]
 
-        # step 4: pattern learning + annotation guidelines
+    #     # step 4: pattern learning + annotation guidelines
 
-        # step 5: compress these patterns in more general ones
-
-        return patterns
+    #     # step 5: compress these patterns in more general ones
+    #     return comp_patterns

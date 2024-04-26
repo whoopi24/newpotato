@@ -8,6 +8,7 @@ from tqdm import tqdm
 
 from newpotato.evaluate import HITLEvaluator
 from newpotato.hitl import HITLManager
+from newpotato.oie_patterns import *
 from newpotato.utils import get_triplets_from_user
 
 console = Console()
@@ -204,14 +205,24 @@ class NPTerminalClient:
                 else:
                     get_triplets_from_user(sen, self.hitl, console)
 
-    def execute_oie(self):
+    def run_oie(self):
 
         if self.hitl.parsed_graphs == {}:
             console.print(
                 "[bold red]That choice requires parsed sentences, run (S)entence or (U)pload first![/bold red]"
             )
         else:
-            common_patterns = self.hitl.generalise_graphs()
+            # get generalised patterns
+            patterns = self.hitl.generalise_graph(top_n=70)
+            print(patterns)
+
+            # get simplified patterns
+            simple_patterns = simplify_patterns(patterns)
+            print(simple_patterns)
+
+            # compress patterns
+            comp_patterns = compress_patterns(simple_patterns)
+            print(comp_patterns)
 
         return print("Work in progress.")
 
@@ -252,7 +263,7 @@ class NPTerminalClient:
                 console.print("[bold red]Exiting...[/bold red]")
                 break
             elif choice == "O":
-                self.execute_oie()
+                self.run_oie()
             elif choice == "H":
                 console.print(
                     "[bold cyan]Help:[/bold cyan]\n"
