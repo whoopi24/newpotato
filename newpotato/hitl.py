@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import random
 import re
 from collections import defaultdict
@@ -593,7 +594,7 @@ class HITLManager:
 
         return matches_by_text
 
-    def generalise_graph(self, top_n=50):
+    def generalise_graph(self, top_n=50, path="example.db"):
 
         # transform hyperedges into abstract patterns
         pc = PatternCounter(
@@ -610,39 +611,27 @@ class HITLManager:
             }
         )
 
+        # 1st version
+        # for _, graph in self.parsed_graphs.items():
+        #     edge = graph["main_edge"]
+        #     # exclusion of conjunctions
+        #     edges = conjunctions_decomposition(edge, concepts=True)
+        #     for e in edges:
+        #         pc.count(e)
+
+        # 2nd version (https://graphbrain.net/tutorials/hypergraph-operations.html#parse-sentence-and-add-hyperedge-to-hypergraph)
+        if os.path.exists(path):
+            os.remove(path)
+        hg = hgraph(path)
         for _, graph in self.parsed_graphs.items():
             edge = graph["main_edge"]
             # exclusion of conjunctions
             edges = conjunctions_decomposition(edge, concepts=True)
             for e in edges:
+                hg.add(e)
+
+        for e in hg.all():
+            if hg.is_primary(e):
                 pc.count(e)
 
         return pc.patterns.most_common(top_n)
-
-    # def compress_patterns(self, patterns: list) -> list:
-    #     # step 2: summaries patterns
-    #     print(patterns)
-    #     comp_patterns = []
-    #     for p1, _ in patterns:
-    #         for p2, _ in patterns:
-    #             if p1 == p2:
-    #                 continue
-    #             comm = common_pattern(hedge(p1), hedge(p2))
-    #             if len(comp_patterns) > 0:
-    #                 for p3 in comp_patterns:
-    #                     comm = common_pattern(hedge(comm), hedge(p3))
-    #                     if comm not in comp_patterns:
-    #                         comp_patterns.append(comm)
-    #             else:
-    #                 if comm not in comp_patterns:
-    #                     comp_patterns.append(comm)
-
-    #     print(comp_patterns)
-
-    #     # step 3: take 50 most common of these patterns
-    #     comp_patterns = comp_patterns[:50]
-
-    #     # step 4: pattern learning + annotation guidelines
-
-    #     # step 5: compress these patterns in more general ones
-    #     return comp_patterns

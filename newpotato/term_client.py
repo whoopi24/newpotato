@@ -205,6 +205,22 @@ class NPTerminalClient:
                 else:
                     get_triplets_from_user(sen, self.hitl, console)
 
+    def save_oie_file(self, obj):
+        while True:
+            console.print("[bold cyan]Enter path to OIE output file:[/bold cyan]")
+            fn = input("> ")
+            try:
+                with open(fn, "w") as f:
+                    for line in obj:
+                        f.write(f"{line}\n")
+            except FileNotFoundError:
+                console.print(f"[bold red] No such file or directory: {fn}[/bold red]")
+            else:
+                console.print(
+                    f"[bold cyan]Successfully saved OIE output file to {fn}[/bold cyan]"
+                )
+                return
+
     def run_oie(self):
 
         if self.hitl.parsed_graphs == {}:
@@ -213,15 +229,18 @@ class NPTerminalClient:
             )
         else:
             # get generalised patterns
-            patterns = self.hitl.generalise_graph(top_n=70)
-            print(patterns)
+            patterns = self.hitl.generalise_graph(top_n=100, path="oie_graph.db")
+            # self.save_oie_file(patterns)
+            # print(patterns)
 
             # get simplified patterns
             simple_patterns = simplify_patterns(patterns)
-            print(simple_patterns)
+            # self.save_oie_file(simple_patterns)
+            # print(simple_patterns)
 
             # compress patterns
             comp_patterns = compress_patterns(simple_patterns)
+            # self.save_oie_file(comp_patterns)
             print(comp_patterns)
 
         return print("Work in progress.")

@@ -1,11 +1,14 @@
 import logging
 import operator
+import sys
 from typing import Any, Dict
 
 from graphbrain import hedge
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
+logging.basicConfig(
+    stream=sys.stderr, format="%(levelname)s:%(message)s", level=logging.DEBUG
+)
 
 
 # copied from: https://stackoverflow.com/questions/71732405/splitting-words-by-whitespace-without-affecting-brackets-content-using-regex
@@ -88,15 +91,17 @@ def compare_patterns(edge1, edge2):
             elif s1.count(" ") == s2.count(" ") and s1.count(" ") > 0:
                 logger.debug(f"recursion needed")
                 s3 = compare_patterns(s1, s2)
-                final.append("".join(s3))  # type: ignore
+                if s3 is None:
+                    logger.debug(f"patterns cannot be compressed")
+                    return None
+                else:
+                    final.append("".join(s3))  # type: ignore
             elif s1.count(" ") > 0 or s2.count(" ") > 0:
                 logger.debug(f"patterns cannot be compressed")
                 return None
             elif s1[:3] == s2[:3]:
                 logger.debug(f"patterns have common characters")
                 # compare each character of the string
-
-                # ToDo
                 s3 = []
                 iter = 0
                 for k, l in zip(s1, s2):
