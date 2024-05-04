@@ -223,25 +223,30 @@ class NPTerminalClient:
 
     def run_oie(self):
 
-        if self.hitl.parsed_graphs == {}:
-            console.print(
-                "[bold red]That choice requires parsed sentences, run (S)entence or (U)pload first![/bold red]"
-            )
-        else:
-            # get generalised patterns
-            patterns = self.hitl.generalise_graph(top_n=100, path="oie_graph.db")
-            # self.save_oie_file(patterns)
-            # print(patterns)
+        # if self.hitl.parsed_graphs == {}:
+        #     console.print(
+        #         "[bold red]That choice requires parsed sentences, run (S)entence or (U)pload first![/bold red]"
+        #     )
+        # else:
 
-            # get simplified patterns
-            simple_patterns = simplify_patterns(patterns)
-            # self.save_oie_file(simple_patterns)
-            # print(simple_patterns)
+        hg = self.hitl.parse_sent_with_annotations(path="output.pkl")
+        patterns = self.hitl.generalise_graph_v2(hg=hg, top_n=100)
+        print(patterns)
 
-            # compress patterns
-            comp_patterns = compress_patterns(simple_patterns)
-            # self.save_oie_file(comp_patterns)
-            print(comp_patterns)
+        # get generalised patterns
+        # patterns = self.hitl.generalise_graph(top_n=100, path="oie_graph.db")
+        # self.save_oie_file(patterns)
+        # print(patterns)
+
+        # get simplified patterns
+        # simple_patterns = simplify_patterns(patterns)
+        # self.save_oie_file(simple_patterns)
+        # print(simple_patterns)
+
+        # compress patterns
+        # comp_patterns = compress_patterns(simple_patterns)
+        # self.save_oie_file(comp_patterns)
+        # print(comp_patterns)
 
         return print("Work in progress.")
 

@@ -599,37 +599,77 @@ class HITLManager:
         atoms = edge.all_atoms()  # 'graphbrain.hyperedge.Atom'
         sum = 0
         for atom in atoms:
-            if atom.root() == to_replace:
+            if atom.root() == to_replace.lower():
                 sum += 1
-                found = atom  # saves last match
-        if sum == 1 or unique == False:
+                found = atom  # saves first match
+                break
+        if sum == 0:
+            return edge
+        elif sum == 1 or unique == False:
             newatom = found.replace_atom_part(0, replacement)
-            newedge = edge.replace_atom(atoms[0], newatom, unique=True)
+            newedge = edge.replace_atom(
+                found, newatom, unique=False
+            )  # replaces all occurences with newatom when argroles match
+            return newedge
         else:
             # ToDo: find correct atom when there are multiple atoms found
             print("multiple atoms found")
 
-        return newedge
-
     def parse_sent_with_annotations(self, path="sample.pkl"):
         with open(path, "rb") as f:
             loaded_dict = pickle.load(f)
+        hg = hgraph("ex.db")
         for i in range(0, len(loaded_dict)):
             sen = " ".join(loaded_dict[i]["sent"])
-
             toks = loaded_dict[i]["sent"]
-
+            # parse sentence
             self.get_graphs(sen)
             edge = self.parsed_graphs["latest"]["main_edge"]
+            newedge = edge
             for p in loaded_dict[i]["pred"]:
-                print(p)
                 to_replace = toks[p]
+                # print(to_replace)
                 replacement = "REL"
                 newedge = self.replace_atom_with_annotation(
-                    edge, to_replace, replacement, unique=False
+                    newedge, to_replace, replacement, unique=False
                 )
-                print(newedge)
-            break
+            args = loaded_dict[i]["args"]
+            for replacement in args:
+                # print(replacement)
+                for a in args[replacement]:
+                    to_replace = toks[a]
+                    # print(to_replace)
+                    newedge = self.replace_atom_with_annotation(
+                        newedge, to_replace, replacement, unique=False
+                    )
+                    # print(newedge)
+
+            # ToDo: type inference rules (p. 8) for equal annotations
+
+            # exclusion of conjunctions
+            edges = conjunctions_decomposition(newedge, concepts=True)
+            for e in edges:
+                hg.add(e)
+        return hg
+
+    def generalise_graph_v2(self, hg, top_n=50):
+
+        # transform hyperedges into abstract patterns
+        pc = PatternCounter(
+            expansions={
+                "(*/T */R)",
+                "(*/T */C)",
+                "(* * *)",
+                "(* * * *)",
+            },
+            match_roots={"*/P", "*/C", "*/T", "*/B"},
+        )
+
+        for e in hg.all():
+            if hg.is_primary(e):
+                pc.count(e)
+
+        return pc.patterns.most_common(top_n)
 
     def generalise_graph(self, top_n=50, path="example.db"):
 
