@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import pickle
 import random
 import re
 from collections import defaultdict
@@ -8,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
 from graphbrain import hgraph
-from graphbrain.hyperedge import Hyperedge
+from graphbrain.hyperedge import Atom, Hyperedge
 
 # from graphbrain.hypergraph import Hypergraph
 from graphbrain.learner.classifier import Classifier
@@ -594,6 +595,42 @@ class HITLManager:
 
         return matches_by_text
 
+    def replace_atom_with_annotation(self, edge, to_replace, replacement, unique=False):
+        atoms = edge.all_atoms()  # 'graphbrain.hyperedge.Atom'
+        sum = 0
+        for atom in atoms:
+            if atom.root() == to_replace:
+                sum += 1
+                found = atom  # saves last match
+        if sum == 1 or unique == False:
+            newatom = found.replace_atom_part(0, replacement)
+            newedge = edge.replace_atom(atoms[0], newatom, unique=True)
+        else:
+            # ToDo: find correct atom when there are multiple atoms found
+            print("multiple atoms found")
+
+        return newedge
+
+    def parse_sent_with_annotations(self, path="sample.pkl"):
+        with open(path, "rb") as f:
+            loaded_dict = pickle.load(f)
+        for i in range(0, len(loaded_dict)):
+            sen = " ".join(loaded_dict[i]["sent"])
+
+            toks = loaded_dict[i]["sent"]
+
+            self.get_graphs(sen)
+            edge = self.parsed_graphs["latest"]["main_edge"]
+            for p in loaded_dict[i]["pred"]:
+                print(p)
+                to_replace = toks[p]
+                replacement = "REL"
+                newedge = self.replace_atom_with_annotation(
+                    edge, to_replace, replacement, unique=False
+                )
+                print(newedge)
+            break
+
     def generalise_graph(self, top_n=50, path="example.db"):
 
         # transform hyperedges into abstract patterns
@@ -608,7 +645,8 @@ class HITLManager:
                 # "(+/B.ma * *)",
                 # "(+/B.mm * *)",
                 # "(+/B * *)",
-            }
+            },
+            # match_roots={"PRED", "A0"},
         )
 
         # 1st version
