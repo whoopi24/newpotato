@@ -615,11 +615,16 @@ class HITLManager:
             # ToDo: find correct atom when there are multiple atoms found
             print("multiple atoms found")
 
-    def parse_sent_with_annotations(self, path="sample.pkl"):
-        with open(path, "rb") as f:
+    def parse_sent_with_annotations(self, max_items, input="sample.pkl", path="ex.db"):
+        with open(input, "rb") as f:
             loaded_dict = pickle.load(f)
-        hg = hgraph("ex.db")
-        for i in range(0, len(loaded_dict)):
+        if os.path.exists(path):
+            os.remove(path)
+        hg = hgraph(path)
+        iter = 0
+
+        for i in range(0, min(len(loaded_dict), max_items)):
+            print(f"processing sentence {i}")
             sen = " ".join(loaded_dict[i]["sent"])
             toks = loaded_dict[i]["sent"]
             # parse sentence
@@ -642,14 +647,37 @@ class HITLManager:
                     newedge = self.replace_atom_with_annotation(
                         newedge, to_replace, replacement, unique=False
                     )
-                    # print(newedge)
 
+            print(newedge)
             # ToDo: type inference rules (p. 8) for equal annotations
+            subedges = newedge.subedges()
+            for se in subedges:
+                if se.atom:
+                    continue
+                atoms = se.all_atoms()
+                roots = []
+                for atom in atoms:
+                    roots.append(atom.root())
+                if len(set(roots)) == 1:
+                    print(se)
+                    print(se.argroles())
+                    newatom = (
+                        "(" + roots[0] + "/" + se.type() + "." + se.argroles() + ")"
+                    )
+                    newedge = se.replace_atom(se, newatom, unique=False)
+                    print(newatom)
+                    print(newedge)
+
+                    # how to build hyperedge again?
+
+            break
 
             # exclusion of conjunctions
             edges = conjunctions_decomposition(newedge, concepts=True)
             for e in edges:
                 hg.add(e)
+            iter += 1
+            break
         return hg
 
     def generalise_graph_v2(self, hg, top_n=50):
@@ -662,12 +690,16 @@ class HITLManager:
                 "(* * *)",
                 "(* * * *)",
             },
-            match_roots={"*/P", "*/C", "*/T", "*/B"},
+            match_roots={"*/P", "*/C", "*/T", "*/B", "*/S"},
+            count_subedges=False,
         )
 
         for e in hg.all():
             if hg.is_primary(e):
-                pc.count(e)
+                try:
+                    pc.count(e)
+                except:
+                    continue
 
         return pc.patterns.most_common(top_n)
 
@@ -680,13 +712,9 @@ class HITLManager:
                 "(*/T */C)",
                 "(* * *)",
                 "(* * * *)",
-                # not working:
-                # "(+/B.am * *)",
-                # "(+/B.ma * *)",
-                # "(+/B.mm * *)",
-                # "(+/B * *)",
             },
-            # match_roots={"PRED", "A0"},
+            match_roots={"+/B"},
+            count_subedges=True,
         )
 
         # 1st version
