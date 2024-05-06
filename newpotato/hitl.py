@@ -8,6 +8,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
+import stanza
 from graphbrain import hgraph
 from graphbrain.hyperedge import Atom, Hyperedge
 
@@ -18,6 +19,7 @@ from graphbrain.learner.pattern_ops import *
 from graphbrain.learner.rule import Rule
 from graphbrain.patterns import PatternCounter
 from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
+from tuw_nlp.text.utils import gen_tsv_sens
 
 from newpotato.datatypes import GraphParse, Triplet
 from newpotato.parser import TextParserClient
@@ -615,7 +617,56 @@ class HITLManager:
             # ToDo: find correct atom when there are multiple atoms found
             print("multiple atoms found")
 
-    def parse_sent_with_annotations(self, max_items, input="sample.pkl", path="ex.db"):
+    def parse_sent_with_annotations(
+        self, max_items, expect_mappable=True, input="lsoie_wiki_train.conll", output=""
+    ):
+
+        stream = open(input, "r", encoding="utf-8")
+        mydict = {}
+        iter = 0
+        for sen_idx, sen in enumerate(gen_tsv_sens(stream)):
+            if iter == max_items:
+                break
+            print(f"processing sentence {sen_idx}")
+            argsdict = defaultdict(list)
+            sent = []
+            predlist = []
+            for i, tok in enumerate(sen):
+                sent.append(tok[1])
+                label = tok[7].split("-")[0]
+                if label == "O":
+                    continue
+                elif label == "P":
+                    predlist.append(i)
+                    continue
+                argsdict[label].append(i)
+            args = []
+            for label in argsdict:
+                args.append(tuple(argsdict[label]))
+            pred = tuple(predlist)
+            iter += 1
+
+            # parse sentence
+            sent = " ".join(sent)
+            self.get_graphs(sent)
+            graph = self.parsed_graphs[sent]
+            print(graph)
+            mapped_triplet = Triplet(pred, args, graph)
+            if expect_mappable and mapped_triplet.mapped is False:
+                print(f"[bold red] Could not map annotation to subedges![/bold red]")
+                continue
+
+        # pred, args: ((7,), [(3, 4), (9, 10)])
+        # variables: {'REL': found/Pd.poxx.<pf----/en,
+        # 'ARG0': (and/J/en (a/Md/en man/Cc.s/en) (two/M#/en children/Cc.p/en)),
+        # 'ARG1': (this/Md/en morning/Cc.s/en),
+        # 'ARG2': (at/Br.ma/en (a/Md/en home/Cc.s/en) (+/B.mm/. (+/B.am/. fort/Cp.s/en hood/Cp.s/en) (in/Br.ma/en (a/Md/en (+/B.am/. (+/B.am/. us/Cp.s/en army/Cp.s/en) base/Cc.s/en)) texas/Cp.s/en)))}
+
+        mydict[sen_idx] = {"sent": sent, "pred": pred, "args": args}
+
+    def parse_sent_with_annotations_v2(
+        self, max_items, input="sample.pkl", path="ex.db"
+    ):
         with open(input, "rb") as f:
             loaded_dict = pickle.load(f)
         if os.path.exists(path):
