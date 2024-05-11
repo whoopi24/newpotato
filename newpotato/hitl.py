@@ -22,6 +22,10 @@ from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 from tuw_nlp.text.utils import gen_tsv_sens
 
 from newpotato.datatypes import GraphParse, Triplet
+
+# from newpotato.entrypoints import edge_matches_pattern, match_pattern
+# from newpotato.matcher import Matcher
+# from newpotato.counter import PatternCounter
 from newpotato.parser import TextParserClient
 from newpotato.utils import matches2triplets
 
@@ -74,9 +78,12 @@ class Extractor:
         """
         assert self.classifier is not None, "classifier not initialized"
         if learn:
+            print("learn is true")
             self.classifier.learn()
         else:
+            print("learn is false")
             self.classifier.extract_patterns()
+            print("extract rules done!")
             self.classifier._index_rules()
 
     def get_annotated_graphs_from_classifier(self) -> List[str]:
@@ -304,10 +311,13 @@ class HITLManager:
         Args:
             learn (bool): whether to run graphbrain classifier's learn function.
                 If False (default), only extract_patterns is called
+
         """
 
         _ = self.get_annotated_graphs()
+        print("Get agraphs done!")
         self.extractor.extract_rules(learn=learn)
+        print("Extract rules done!")
 
         return self.extractor.get_rules()
 
@@ -651,8 +661,12 @@ class HITLManager:
             # parse sentence
             sent = " ".join(sent)
             self.get_graphs(sent)
-            # sen_graph = self.parsed_graphs["latest"]
-            sen_graph = self.parsed_graphs[sent]
+            try:
+                sen_graph = self.parsed_graphs[sent]
+            except KeyError:
+                if not self.is_parsed(sent):
+                    continue
+                sen_graph = self.parsed_graphs["latest"]
 
             # create triplet
             triplet = Triplet(pred, args, sen_graph)
@@ -766,8 +780,6 @@ class HITLManager:
         # transform hyperedges into abstract patterns
         pc = PatternCounter(
             expansions={
-                "(*/T */R)",
-                "(*/T */C)",
                 "(* * *)",
                 "(* * * *)",
             },
@@ -784,18 +796,23 @@ class HITLManager:
         #         pc.count(e)
 
         # 2nd version (https://graphbrain.net/tutorials/hypergraph-operations.html#parse-sentence-and-add-hyperedge-to-hypergraph)
-        if os.path.exists(path):
-            os.remove(path)
-        hg = hgraph(path)
-        for _, graph in self.parsed_graphs.items():
-            edge = graph["main_edge"]
-            # exclusion of conjunctions
-            edges = conjunctions_decomposition(edge, concepts=True)
-            for e in edges:
-                hg.add(e)
+        # if os.path.exists(path):
+        #     os.remove(path)
+        # hg = hgraph(path)
+        # for _, graph in self.parsed_graphs.items():
+        #     edge = graph["main_edge"]
+        #     # exclusion of conjunctions
+        #     edges = conjunctions_decomposition(edge, concepts=True)
+        #     for e in edges:
+        #         hg.add(e)
 
-        for e in hg.all():
-            if hg.is_primary(e):
-                pc.count(e)
+        # for e in hg.all():
+        #     if hg.is_primary(e):
+        #         pc.count(e)
+
+        # 3rd version
+        cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
+        for edge in cases:
+            pc.count(edge)
 
         return pc.patterns.most_common(top_n)
