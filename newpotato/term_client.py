@@ -229,24 +229,43 @@ class NPTerminalClient:
         #     )
         # else:
 
-        hg = self.hitl.parse_sent_with_annotations(path="output.pkl")
-        patterns = self.hitl.generalise_graph_v2(hg=hg, top_n=100)
-        print(patterns)
+        # self.hitl.parse_sent_with_annotations(
+        #     max_items=70000, input="lsoie_wiki_dev.conll", output="test11.pkl"
+        # )
 
-        # get generalised patterns
-        # patterns = self.hitl.generalise_graph(top_n=100, path="oie_graph.db")
-        # self.save_oie_file(patterns)
+        # hg = self.hitl.parse_sent_with_annotations_v2(
+        #     max_items=60, input="output.pkl", path="ex.db"
+        # )
+        # patterns = self.hitl.generalise_graph_v2(hg=hg, top_n=100)
+
+        # _ = self.hitl.get_annotated_graphs()
+
+        rules = self.hitl.get_rules(learn=self.learn)
+
+        with open("rules_dev.txt", "w") as f:
+            for line in rules:
+                f.write(f"{line}\n")
+
+        # if self.hitl.extractor.classifier is None:
+        #     console.print(
+        #         "[bold red]That choice requires a classifier, run (R)ules first![/bold red]"
+        #     )
+        #     return False
+
+        # # get generalised patterns
+        # patterns = self.hitl.generalise_graph(top_n=100, path="p_dev.db")
         # print(patterns)
+        # self.save_oie_file(patterns)
 
         # get simplified patterns
         # simple_patterns = simplify_patterns(patterns)
-        # self.save_oie_file(simple_patterns)
         # print(simple_patterns)
+        # self.save_oie_file(simple_patterns)
 
         # compress patterns
         # comp_patterns = compress_patterns(simple_patterns)
-        # self.save_oie_file(comp_patterns)
         # print(comp_patterns)
+        # self.save_oie_file(comp_patterns)
 
         return print("Work in progress.")
 
