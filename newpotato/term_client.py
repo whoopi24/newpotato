@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 
 # from rich import print
@@ -221,7 +222,63 @@ class NPTerminalClient:
                 )
                 return
 
+    def evaluate_oie_patterns(self):
+
+        # Graphbrain
+        # PATTERNS = [
+        #     "(REL/P.{[sp][cora]x} ARG1/C ARG2 ARG3...)",
+        #     "(+/B.{m[ma]} (ARG1/C...) (ARG2/C...))",
+        #     "(REL1/P.{sx}-oc ARG1/C (REL2/T ARG2))",
+        #     "(REL1/P.{px} ARG1/C (REL2/T ARG2))",
+        #     "(REL1/P.{sc} ARG1/C (REL3/B REL2/C ARG2/C))",
+        # ]
+
+        # Top5 LSOIE train
+        PATTERNS = [
+            "(REL/P.so ARG0/C ARG1)",
+            "(REL/P.sx ARG0/C ARG1)",
+            "(REL/P.px ARG0/C ARG1)",
+            "(REL/P.sr ARG0/C ARG1)",
+            "(REL/P.sox ARG0/C ARG1/C ARG2)",
+        ]
+
+        # compressed LSOIE train
+        PATTERNS = [
+            # "(*/P.{[sp][crx]} ARG0/C REL)",
+            "(REL/P.{[sp][orx]} ARG0/C ARG1)",
+            # "(REL/P.{[sp][aorx]x} ARG0/C ARG1 ARG2...)",
+        ]
+
+        DIR = "LSOIE/data"
+        input = "lsoie_wiki_dev.conll"
+        output = input.split(".")[0] + "eval.json"
+        extractions = {}
+
+        self.hitl.parse_sent_with_ann_eval(
+            PATTERNS,
+            extractions,
+            max_items=2300,
+            expect_mappable=True,
+            input=input,
+        )
+
+        # print(extractions)
+
+        for _, extraction in extractions.items():
+            print("extraction: ", extraction)
+
+        # ToDo: compare extraction with annotations
+
+        # for _, extraction in extractions.items():
+        #     print("extraction: ", extraction)
+        #     extr[extraction["sent_id"]].append(extraction["data"])
+
+        # with open("{}/{}".format(DIR, EXTR_AFTER), "w", encoding="utf-8") as f:
+        #     json.dump(extr, f, ensure_ascii=False, indent=4)
+
     def run_oie(self):
+
+        self.evaluate_oie_patterns()
 
         # if self.hitl.parsed_graphs == {}:
         #     console.print(
@@ -230,7 +287,7 @@ class NPTerminalClient:
         # else:
 
         # self.hitl.parse_sent_with_annotations(
-        #     max_items=70000, input="lsoie_wiki_dev.conll", output="test11.pkl"
+        #     max_items=70000, input="lsoie_wiki_train.conll", output="test11.pkl"
         # )
 
         # hg = self.hitl.parse_sent_with_annotations_v2(
@@ -240,11 +297,11 @@ class NPTerminalClient:
 
         # _ = self.hitl.get_annotated_graphs()
 
-        rules = self.hitl.get_rules(learn=self.learn)
+        # rules = self.hitl.get_rules(learn=self.learn)
 
-        with open("rules_dev.txt", "w") as f:
-            for line in rules:
-                f.write(f"{line}\n")
+        # with open("rules_dev.txt", "w") as f:
+        #     for line in rules:
+        #         f.write(f"{line}\n")
 
         # if self.hitl.extractor.classifier is None:
         #     console.print(
@@ -255,16 +312,23 @@ class NPTerminalClient:
         # # get generalised patterns
         # patterns = self.hitl.generalise_graph(top_n=100, path="p_dev.db")
         # print(patterns)
+        # print("save patterns:")
         # self.save_oie_file(patterns)
+
+        # f = open("p_train.txt", "r")
+        # patterns = f.read()
+        # print(f.read())
 
         # get simplified patterns
         # simple_patterns = simplify_patterns(patterns)
         # print(simple_patterns)
+        # print("save simplified patterns:")
         # self.save_oie_file(simple_patterns)
 
         # compress patterns
         # comp_patterns = compress_patterns(simple_patterns)
         # print(comp_patterns)
+        # print("save compressed patterns:")
         # self.save_oie_file(comp_patterns)
 
         return print("Work in progress.")
