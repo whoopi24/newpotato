@@ -1,9 +1,19 @@
 import logging
 import operator
+import re
 import sys
 from typing import Any, Dict
 
-from graphbrain import hedge
+import graphbrain.patterns as pattrn
+
+# from graphbrain import *
+from graphbrain.hyperedge import UniqueAtom, hedge
+
+# from graphbrain.parsers import *
+from graphbrain.utils.conjunctions import conjunctions_decomposition
+
+# from graphbrain.parsers.text import edge_text
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -157,3 +167,115 @@ def compress_patterns(mylist):
             compressed[key] = mydict[key]
     compressed = sorted(compressed.items(), key=operator.itemgetter(1), reverse=True)
     return compressed
+
+
+# for evaluation (from openie.py)
+
+
+def edge_text(atom2word, edge):
+    atoms = edge.all_atoms()
+    words = [
+        atom2word[UniqueAtom(atom)] for atom in atoms if UniqueAtom(atom) in atom2word
+    ]
+    words.sort(key=lambda word: word[1])
+    text = " ".join([word[0] for word in words])
+    # remove spaces arounf non alpha-numeric characters
+    # e.g.: "passive-aggressive" instead of "passive - aggressive"
+    text = re.sub(" ([^a-zA-Z\\d\\s]) ", "\\g<1>", text)
+    return text
+
+
+def label(edge, atom2word):
+    return edge_text(atom2word, edge)
+
+
+def main_conjunction(edge):
+    if edge.is_atom():
+        return edge
+    if edge[0] == ":/J/.":
+        return edge[1]
+    return hedge([main_conjunction(subedge) for subedge in edge])
+
+
+def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
+    data = {
+        "arg1": arg1,
+        "rel": rel,
+        "arg2": arg2,
+        "extractor": "newpotato",
+        "score": 1.0,
+    }
+
+    if len(arg3) > 0:
+        data["arg3+"] = arg3
+
+    extraction = "|".join((str(sent_id), edge.to_str(), arg1, rel, arg2))
+
+    if extraction not in extractions:
+        extractions[extraction] = {"data": data, "sent_id": sent_id}
+    elif len(arg3) > 0:
+        if "arg3+" in extractions[extraction]["data"]:
+            extractions[extraction]["data"]["arg3+"] += arg3
+        else:
+            extractions[extraction]["data"]["arg3+"] = arg3
+
+
+def find_tuples(extractions, edge, sent_id, atom2word, PATTERNS):
+    for pattern in PATTERNS:
+        for match in pattrn.match_pattern(edge, pattern):
+            print("pattern: ", pattern)
+            print("match: ", match)
+            rel = label(match["REL"], atom2word)
+            arg0 = label(match["ARG0"], atom2word)
+            arg1 = label(match["ARG1"], atom2word)
+
+            # if "ARG1..." in match:
+            #     arg1 = [label(match["ARG1..."], atom2word)]
+            # else:
+            #     arg1 = []
+
+            if "ARG2" in match:
+                arg2 = [label(match["ARG2"], atom2word)]
+            else:
+                arg2 = []
+
+            add_to_extractions(extractions, edge, sent_id, arg0, rel, arg1, arg2)
+
+    # for pattern in PATTERNS:
+    #     for match in pattrn.match_pattern(edge, pattern):
+    #         print("pattern: ", pattern)
+    #         print("match: ", match)
+    #         arg1 = match["ARG1"]
+    #         arg2 = match["ARG2"]
+    #         if "ARG3..." in match:
+    #             arg3 = [label(match["ARG3..."], atom2word)]
+    #         else:
+    #             arg3 = []
+
+    #         if "REL1" in match:
+    #             rel_parts = []
+    #             i = 1
+    #             while "REL{}".format(i) in match:
+    #                 rel_parts.append(label(match["REL{}".format(i)], atom2word))
+    #                 i += 1
+    #             rel = " ".join(rel_parts)
+    #         else:
+    #             rel = label(match["REL"], atom2word)
+
+    #         arg1 = label(arg1, atom2word)
+    #         arg2 = label(arg2, atom2word)
+
+    #         add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3)
+
+
+def information_extraction(extractions, main_edge, sent_id, atom2word, PATTERNS):
+    if main_edge.is_atom():
+        return
+    if main_edge.type()[0] == "R":
+        edges = conjunctions_decomposition(main_edge, concepts=True)
+        for edge in edges:
+            find_tuples(
+                extractions, main_conjunction(edge), sent_id, atom2word, PATTERNS
+            )
+    for edge in main_edge:
+        information_extraction(extractions, edge, sent_id, atom2word, PATTERNS)
