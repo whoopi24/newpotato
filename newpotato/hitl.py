@@ -17,16 +17,20 @@ from graphbrain.learner.classifier import Classifier
 from graphbrain.learner.classifier import from_json as classifier_from_json
 from graphbrain.learner.pattern_ops import *
 from graphbrain.learner.rule import Rule
-from graphbrain.patterns import PatternCounter
+from graphbrain.parsers import create_parser
+
+# from graphbrain.patterns import PatternCounter
 from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 from tuw_nlp.text.utils import gen_tsv_sens
 
 from newpotato.datatypes import GraphParse, Triplet
+from newpotato.oie_patterns import *
 
 # from newpotato.entrypoints import edge_matches_pattern, match_pattern
 # from newpotato.matcher import Matcher
 # from newpotato.counter import PatternCounter
 from newpotato.parser import TextParserClient
+from newpotato.patterns import PatternCounter
 from newpotato.utils import matches2triplets
 
 
@@ -83,7 +87,7 @@ class Extractor:
         else:
             print("learn is false")
             self.classifier.extract_patterns()
-            print("extract rules done!")
+            print("extract patterns done!")
             self.classifier._index_rules()
 
     def get_annotated_graphs_from_classifier(self) -> List[str]:
@@ -627,6 +631,47 @@ class HITLManager:
             # ToDo: find correct atom when there are multiple atoms found
             print("multiple atoms found")
 
+    def parse_sent_with_ann_eval(
+        self,
+        PATTERNS,
+        extractions,
+        max_items,
+        expect_mappable=True,
+        input="lsoie_wiki_dev.conll",
+    ):
+        stream = open(input, "r", encoding="utf-8")
+        iter = 0
+        parser = create_parser(lang="en", corefs=False)
+        last_sent = ""
+        for sen_idx, sen in enumerate(gen_tsv_sens(stream)):
+            if iter == max_items:
+                break
+            print(f"processing sentence {sen_idx}")
+            # get sentence
+            sent = []
+            for _, tok in enumerate(sen):
+                sent.append(tok[1])
+
+            # parse sentence
+            sent = " ".join(sent)
+            if sent == last_sent:
+                continue
+            last_sent = sent
+            parse_result = parser.parse(sent)
+            for parse in parse_result["parses"]:
+                main_edge = parse["main_edge"]
+                atom2word = parse["atom2word"]
+                if main_edge:
+                    # print(f"{sent=}, {main_edge=}, {atom2word=}")
+                    information_extraction(
+                        extractions, main_edge, sen_idx, atom2word, PATTERNS
+                    )
+
+            # next round
+            iter += 1
+
+        # return(extractions)
+
     def parse_sent_with_annotations(
         self, max_items, expect_mappable=True, input="lsoie_wiki_train.conll", output=""
     ):
@@ -675,6 +720,14 @@ class HITLManager:
                 continue
             elif isinstance(triplet, Triplet):
                 self.store_triplet(sent, triplet, True)
+
+            # elif isinstance(triplet, Triplet):
+            #     self.store_triplet(sent, triplet, True)
+            #     success = triplet.map_to_subgraphs(sen_graph)
+            #     if not success:
+            #         logging.warning("failed to map triplet, skipping")
+            #         continue
+            # print(f"{triplet=}, {triplet.variables=}")
 
             # next round
             iter += 1
@@ -784,7 +837,7 @@ class HITLManager:
                 "(* * * *)",
             },
             match_roots={"+/B"},
-            count_subedges=True,
+            count_subedges=False,
         )
 
         # 1st version
@@ -811,8 +864,12 @@ class HITLManager:
         #         pc.count(e)
 
         # 3rd version
-        cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
-        for edge in cases:
+        for edge in self.get_annotated_graphs():
             pc.count(edge)
+
+        # 4th version
+        # cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
+        # for edge in cases:
+        #     pc.count(edge)
 
         return pc.patterns.most_common(top_n)
