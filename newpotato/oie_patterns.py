@@ -46,14 +46,34 @@ def split_pattern(s):
     return result
 
 
-def _simplify_patterns(edge):
+def _simplify_patterns(edge, strict):
+    e1 = split_pattern(edge)
+    final = []
+    for i in range(0, len(e1)):
+        s1 = hedge(e1[i])
+        if len(s1) > 1:
+            logger.debug(f"recursion needed")
+            s = _simplify_patterns(s1, strict)
+            final.append(str(s))
+        # ignore argroles for variables and concepts
+        else:
+            if s1.mtype() in ["C", "R", "S"] and strict:
+                s1 = s1.root()
+            elif s1.mtype() in ["C", "R", "S"]:
+                s1 = s1.simplify()
+            final.append("".join(s1))
+    final = "(" + " ".join(final) + ")"
+    return hedge(final)
+
+
+def _simplify_patterns_v0(edge):
     e1 = split_pattern(edge)
     final = []
     for i in range(0, len(e1)):
         s1 = e1[i]
         if s1.count(" ") > 0:
             logger.debug(f"recursion needed")
-            s = _simplify_patterns(s1)
+            s = _simplify_patterns_v0(s1)
             final.append(str(s))
         # ignore argroles for concepts
         elif s1[2] == "C" or s1[2] == "R":
@@ -71,13 +91,13 @@ def _simplify_patterns(edge):
     return hedge(final)
 
 
-def simplify_patterns(mylist):
+def simplify_patterns(mylist, strict=False):
     # initializations
     mydict = {}
 
     # create dictionary with patterns as keys and counts as values
     for p, cnt in mylist:
-        new_p = _simplify_patterns(p)
+        new_p = _simplify_patterns(p, strict)
         logger.debug(f"convert {p} into {new_p}")
         mydict[new_p] = mydict.get(new_p, 0) + cnt
     simplifed_patterns = sorted(
@@ -223,23 +243,26 @@ def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
 def find_tuples(extractions, edge, sent_id, atom2word, PATTERNS):
     for pattern in PATTERNS:
         for match in pattrn.match_pattern(edge, pattern):
+            if match == {}:
+                continue
             print("pattern: ", pattern)
             print("match: ", match)
             rel = label(match["REL"], atom2word)
             arg0 = label(match["ARG0"], atom2word)
-            arg1 = label(match["ARG1"], atom2word)
+            # arg1 = label(match["ARG1"], atom2word)
 
-            # if "ARG1..." in match:
-            #     arg1 = [label(match["ARG1..."], atom2word)]
-            # else:
-            #     arg1 = []
+            if "ARG1" in match:
+                arg1 = label(match["ARG1"], atom2word)
+            else:
+                arg1 = {}
 
             if "ARG2" in match:
-                arg2 = [label(match["ARG2"], atom2word)]
+                arg2 = label(match["ARG2"], atom2word)
             else:
-                arg2 = []
+                arg2 = {}
 
-            add_to_extractions(extractions, edge, sent_id, arg0, rel, arg1, arg2)
+            print(f"{arg0=}, {rel=}, {arg1=}, {arg2=}")
+            # add_to_extractions(extractions, edge, sent_id, arg0, rel, arg1, arg2)
 
     # for pattern in PATTERNS:
     #     for match in pattrn.match_pattern(edge, pattern):

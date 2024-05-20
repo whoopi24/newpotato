@@ -109,11 +109,11 @@ class NPTerminalClient:
         self.print_triplets(triplets, max_n=10)
 
     def print_rules(self):
-        annotated_graphs = self.hitl.get_annotated_graphs()
+        # annotated_graphs = self.hitl.get_annotated_graphs()
         rules = self.hitl.get_rules(learn=self.learn)
 
-        console.print("[bold green]Annotated Graphs:[/bold green]")
-        console.print(annotated_graphs)
+        # console.print("[bold green]Annotated Graphs:[/bold green]")
+        # console.print(annotated_graphs)
 
         console.print("[bold green]Extracted Rules:[/bold green]")
         console.print(rules)
@@ -226,27 +226,46 @@ class NPTerminalClient:
 
         # Graphbrain
         # PATTERNS = [
-        #     "(REL/P.{[sp][cora]x} ARG1/C ARG2 ARG3...)",
-        #     "(+/B.{m[ma]} (ARG1/C...) (ARG2/C...))",
+        #     "(REL/P.{scx} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{sox} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{srx} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{sax} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{pcx} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{pox} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{prx} ARG1/C ARG2 ARG3...)",
+        #     "(REL/P.{pax} ARG1/C ARG2 ARG3...)",
+        #     "(+/B.{ma} (ARG1/C...) (ARG2/C...))",
+        #     "(+/B.{mm} (ARG1/C...) (ARG2/C...))",
         #     "(REL1/P.{sx}-oc ARG1/C (REL2/T ARG2))",
         #     "(REL1/P.{px} ARG1/C (REL2/T ARG2))",
         #     "(REL1/P.{sc} ARG1/C (REL3/B REL2/C ARG2/C))",
         # ]
 
-        # Top5 LSOIE train
-        PATTERNS = [
-            "(REL/P.so ARG0/C ARG1)",
-            "(REL/P.sx ARG0/C ARG1)",
-            "(REL/P.px ARG0/C ARG1)",
-            "(REL/P.sr ARG0/C ARG1)",
-            "(REL/P.sox ARG0/C ARG1/C ARG2)",
-        ]
+        # Top10 LSOIE train - add {} around argroles to find more matches
+        # PATTERNS = [
+        #     "(REL/P.{px} ARG0 ARG1)",
+        #     "((*/M REL/P.{px}) ARG0 ARG1)",
+        #     "(REL/P.{sx} ARG0 ARG1)",
+        #     "(REL/P.{sr} ARG0 ARG1)",
+        #     "((*/M REL/P.{so}) ARG0 ARG1)",
+        #     "(REL/P.{sox} ARG0 ARG1 ARG2...)",
+        # ]
 
-        # compressed LSOIE train
+        # patterns with variables
+        # PATTERNS = [
+        #     "(*/P.{ox} (*/B.{mm} (var * ARG0) (var * REL)) (* (*/B.{mm} * (var * ARG1))))",
+        #     "((var */P.{sxx} REL) (var * ARG0) (var * ARG2) (var * ARG1))",
+        #     "(*/P.{rx} (*/P.{c} (*/B.{ma} ((var * REL) *) *)) (* (*/P.{r} (* ((var * REL) ((var * ARG0) *))))))",
+        #     "((* (var */P.{s} REL)) (var * ARG0))",
+        #     "((* (* (var */P.{r} REL))) (*/P.{o} (var * ARG0)))",
+        #     "(* (any ((var */P.{sc} REL) (var * ARG0) (var * ARG1)) (*/P.{o} (*/B.{ma} * ((var * REL) (var * ARG0))))) *)",
+        #     "(* (any ((var */P.{sc} REL) (var * ARG0) (var * ARG1)) *) (any (*/P.{or} (var * ARG0) ((var */P.{x} REL) *)) *))",
+        # ]
+
+        # test
         PATTERNS = [
-            # "(*/P.{[sp][crx]} ARG0/C REL)",
-            "(REL/P.{[sp][orx]} ARG0/C ARG1)",
-            # "(REL/P.{[sp][aorx]x} ARG0/C ARG1 ARG2...)",
+            "(*/P.{px} ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
+            "((*/M */P.{px}) ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
         ]
 
         DIR = "LSOIE/data"
@@ -257,7 +276,7 @@ class NPTerminalClient:
         self.hitl.parse_sent_with_ann_eval(
             PATTERNS,
             extractions,
-            max_items=2300,
+            max_items=10,
             expect_mappable=True,
             input=input,
         )
@@ -278,7 +297,7 @@ class NPTerminalClient:
 
     def run_oie(self):
 
-        self.evaluate_oie_patterns()
+        # self.evaluate_oie_patterns()
 
         # if self.hitl.parsed_graphs == {}:
         #     console.print(
@@ -287,7 +306,7 @@ class NPTerminalClient:
         # else:
 
         # self.hitl.parse_sent_with_annotations(
-        #     max_items=70000, input="lsoie_wiki_train.conll", output="test11.pkl"
+        #     max_items=200, input="lsoie_wiki_train_small.conll", output="test11.pkl"
         # )
 
         # hg = self.hitl.parse_sent_with_annotations_v2(
@@ -295,23 +314,15 @@ class NPTerminalClient:
         # )
         # patterns = self.hitl.generalise_graph_v2(hg=hg, top_n=100)
 
-        # _ = self.hitl.get_annotated_graphs()
-
-        # rules = self.hitl.get_rules(learn=self.learn)
-
-        # with open("rules_dev.txt", "w") as f:
-        #     for line in rules:
-        #         f.write(f"{line}\n")
-
         # if self.hitl.extractor.classifier is None:
         #     console.print(
         #         "[bold red]That choice requires a classifier, run (R)ules first![/bold red]"
         #     )
         #     return False
 
-        # # get generalised patterns
-        # patterns = self.hitl.generalise_graph(top_n=100, path="p_dev.db")
-        # print(patterns)
+        # get generalised patterns
+        patterns = self.hitl.generalise_graph(top_n=50, path="p_dev.db")
+        print(patterns)
         # print("save patterns:")
         # self.save_oie_file(patterns)
 
@@ -320,16 +331,10 @@ class NPTerminalClient:
         # print(f.read())
 
         # get simplified patterns
-        # simple_patterns = simplify_patterns(patterns)
+        # simple_patterns = simplify_patterns(patterns, strict=True)
         # print(simple_patterns)
         # print("save simplified patterns:")
         # self.save_oie_file(simple_patterns)
-
-        # compress patterns
-        # comp_patterns = compress_patterns(simple_patterns)
-        # print(comp_patterns)
-        # print("save compressed patterns:")
-        # self.save_oie_file(comp_patterns)
 
         return print("Work in progress.")
 
