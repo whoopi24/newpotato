@@ -8,6 +8,8 @@ import graphbrain.constants as const
 from graphbrain import hedge
 from graphbrain.hyperedge import Hyperedge
 from graphbrain.hypergraph import Hypergraph
+from graphbrain.learner.classifier import apply_curly_brackets
+from graphbrain.learner.pattern_ops import all_variables, contains_variable
 from graphbrain.semsim import semsim
 from graphbrain.utils.lemmas import lemma
 from graphbrain.utils.semsim import (
@@ -24,6 +26,21 @@ from graphbrain.utils.semsim import (
 logger = logging.getLogger(__name__)
 
 FUNS = {"var", "atoms", "lemma", "any", "semsim", "semsim-fix", "semsim-ctx"}
+
+argrole_order = {
+    "m": -1,
+    "s": 0,
+    "p": 1,
+    "a": 2,
+    "c": 3,
+    "o": 4,
+    "i": 5,
+    "t": 6,
+    "j": 7,
+    "x": 8,
+    "r": 9,
+    "?": 10,
+}
 
 
 def is_wildcard(atom):
@@ -824,7 +841,7 @@ def _edge2pattern(edge, root=False, subtype=False):
     if root and edge.atom:
         root_str = edge.root()
     ## START: MARINA
-    elif edge.contains("var", deep=True):
+    elif contains_variable(edge):
         # print("var is contained")
         if edge.contains("REL", deep=True):
             root_str = "REL"
@@ -960,10 +977,10 @@ class PatternCounter:
             )
         # print("hpats: ", hpats)
         if len(ledge) == 1:
-            # print("length == 1")
+            print("length == 1")
             patterns = [[hpat] for hpat in hpats]
         else:
-            # print("length != 1 > recursion")
+            print("length != 1 > recursion")
             patterns = []
             for pattern in self._list2patterns(
                 ledge[1:],
@@ -988,16 +1005,31 @@ class PatternCounter:
             )
         ]
 
-    def count(self, edge):
+    def count(self, edge, check_vars=True):
         edge = hedge(edge)
-        # print(edge)
+        print("edge: ", edge)
+        vars = all_variables(edge)
+        # print("variables: ", vars.keys())
         if edge.not_atom:
             if self._matches_expansions(edge):
                 # print("matches expansions")
                 for pattern in self._edge2patterns(edge):
-                    # print("count: ", pattern)
-                    self.patterns[hedge(pattern)] += 1
+                    if check_vars:
+                        skip = False
+                        atoms = pattern.atoms()
+                        roots = {atom.root() for atom in atoms}
+                        for var in vars:
+                            if str(var) in roots:
+                                continue
+                            else:
+                                skip = True
+                                break
+                        if not skip:
+                            print("count: ", pattern)
+                            self.patterns[hedge(apply_curly_brackets(pattern))] += 1
+                    else:
+                        self.patterns[hedge(apply_curly_brackets(pattern))] += 1
             if self.count_subedges:
-                # print("go for subedges")
+                print("go for subedges")
                 for subedge in edge:
                     self.count(subedge)
