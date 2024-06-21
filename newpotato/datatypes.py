@@ -192,7 +192,13 @@ class Triplet:
     """
 
     def __init__(
-        self, pred, args, sen_graph=None, mapped=False, variables=None, strict=True
+        self,
+        pred,
+        args,
+        sen_graph=None,
+        mapped=False,
+        variables=None,
+        strict=False,  # changed strict to False
     ):
         logging.debug(f"triple init got: pred: {pred}, args: {args}")
         self.pred = None if pred is None else tuple(int(i) for i in pred)

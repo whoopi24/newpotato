@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 app = FastAPI()
-parser = TextParser()
+parser = TextParser(corefs=False)
 
 
 class TextToParse(BaseModel):
