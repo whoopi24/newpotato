@@ -12,11 +12,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
 
 
-# copied from: https://www.geeksforgeeks.org/python-count-the-number-of-matching-characters-in-a-pair-of-string/
-def common_char(str1, str2):
-    return len((set(str1)).intersection(set(str2)))
-
-
 # copied from: https://stackoverflow.com/questions/71732405/splitting-words-by-whitespace-without-affecting-brackets-content-using-regex
 def split_pattern(s):
     string = str(s)
@@ -42,7 +37,7 @@ def split_pattern(s):
     return result
 
 
-def compare_pattern(edge1, edge2):
+def compare_patterns(edge1, edge2):
     e1 = split_pattern(edge1)
     e2 = split_pattern(edge2)
     if len(e1) == len(e2):
@@ -56,35 +51,31 @@ def compare_pattern(edge1, edge2):
                 final.append(s1)
             elif s1.count(" ") == s2.count(" ") and s1.count(" ") > 0:
                 logger.debug(f"recursion needed")
-                s3 = compare_pattern(s1, s2)
+                s3 = compare_patterns(s1, s2)
                 final.append("".join(s3))  # type: ignore
             elif s1[:3] == s2[:3]:
                 logger.debug(f"patterns have common characters")
-                # ignore argroles for concepts
-                if s1[2] == "C":
-                    final.append("".join(s1[:3]))
                 # compare each character of the string
-                else:
-                    s3 = []
-                    iter = 0
-                    for k, l in zip(s1, s2):
-                        if iter < 4:
-                            iter += 1
-                            s3.append(k)
-                        elif k == l:
-                            s3.append(k)
-                        else:
-                            logger.debug(f"patterns were compressed")
-                            s3.append("[" + k + l + "]")
-                    final.append("".join(s3))
+                s3 = []
+                iter = 0
+                for k, l in zip(s1, s2):
+                    if iter < 4:
+                        iter += 1
+                        s3.append(k)
+                    elif k == l:
+                        s3.append(k)
+                    else:
+                        logger.debug(f"patterns were compressed")
+                        s3.append("[" + k + l + "]")
+                final.append("".join(s3))
             else:
                 logger.debug(f"patterns cannot be compressed")
-                return edge1
+                return None
         final = "(" + " ".join(final) + ")"
-        return final
+        return hedge(final)
     else:
         logger.debug(f"patterns have unequal length")
-        return edge1
+        return None
 
 
 def _simplify_pattern(edge):
@@ -128,7 +119,7 @@ def simplify_patterns(mylist):
     return simplifed_patterns
 
 
-parser = create_parser(lang="en")
+# parser = create_parser(lang="en")
 text = """
 In 2007 , member states agreed that , in the future , 20 % of the energy used across the EU must be renewable ,
 and carbon dioxide emissions have to be lower in 2020 by at least 20 % compared to 1990 levels.
@@ -142,15 +133,10 @@ pc = PatternCounter(
         "(*/T */C)",
         "(* * *)",
         "(* * * *)",
-        # not working:
-        # "(+/B.am/. * *)",
-        # "(+/B.ma/. * *)",
-        # "(+/B.mm/. * *)",
-        # "(+/B/. * *)",
-    }
+    },
+    match_roots={"+/B"},
 )
 
-# +/B.am/.  bzw. +/B/. bzw. +/B.mm/. bzw. +/B.ma/.
 parse_results = parser.parse(text)
 for parse in parse_results["parses"]:
     edges = conjunctions_decomposition(parse["main_edge"], concepts=True)
@@ -180,44 +166,49 @@ comm = common_pattern(hedge(edge1), hedge(edge2))
 
 # test with list
 mylist = [
-    "(*/B.ma */C */C)",
-    "(*/T */C)",
-    "(*/T */C.ma)",
-    "(*/B.mm */C */C)",
-    "(*/B.ma */C */C.ma)",
+    # "(*/B.ma */C */C)",
+    # "(*/T */C)",
+    "(*/P.{sx} */C (*/T */C))"
+    # "(*/T */C.ma)",
+    # "(*/B.mm */C */C)",
+    # "(*/B.ma */C */C.ma)",
+    "(*/P.{so} */C (*/B.{ma} */C */C))",
 ]
+
+# problem: '(*/P.{s[ox]} */C (*/B[. ][{*][m/][aC][})])'
 compressed = []
 used_idx = []
 for i in range(len(mylist)):
     if i in used_idx:
         continue
     for j in range(i + 1, len(mylist)):
-        # print(mylist[i], mylist[j])
-        res = compare_pattern(mylist[i], mylist[j])
+        print(mylist[i], mylist[j])
+        res = compare_patterns(mylist[i], mylist[j])
+        print(res)
         if mylist[i] != res:
             compressed.append(res)
             used_idx.append(j)
             break
     # no compression found
     compressed.append(mylist[i])
-# print("result: ", set(compressed))
+print("result: ", set(compressed))
 
 # test with dict
-mylist = [
-    ("(*/B.ma */C */C)", 309),
-    ("(*/T */C)", 107),
-    ("(*/T */C.ma)", 65),
-    ("(*/B.mm */C */C)", 45),
-    ("(*/B.ma */C */C.ma)", 41),
-]
-mydict = {}
-for p, cnt in pc.patterns.most_common(5):
-    mydict[p] = cnt
+# mylist = [
+#     ("(*/B.ma */C */C)", 309),
+#     ("(*/T */C)", 107),
+#     ("(*/T */C.ma)", 65),
+#     ("(*/B.mm */C */C)", 45),
+#     ("(*/B.ma */C */C.ma)", 41),
+# ]
+# mydict = {}
+# for p, cnt in pc.patterns.most_common(5):
+#     mydict[p] = cnt
 
 # mydict = {}
 # for p, cnt in mylist:
 #     mydict[p] = cnt
-print(mydict)
+# print(mydict)
 
 # text 1
 # {(*/B.ma */C */C): 5, (*/T */C.ma): 2, (*/T (*/B.ma */C */C)): 2}
@@ -227,9 +218,9 @@ print(mydict)
 
 # total
 # {'(*/B.ma */C */C)': 309, '(*/T */C)': 107, '(*/T */C.ma)': 65, '(*/B.mm */C */C)': 45, '(*/B.ma */C */C.ma)': 41}
-mylist = pc.patterns.most_common(5)
-sim = simplify_patterns(mylist)
-print(sim)
+# mylist = pc.patterns.most_common(5)
+# sim = simplify_patterns(mylist)
+# print(sim)
 
 # compressed = {}
 # used_keys = []

@@ -22,8 +22,18 @@ from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 # ]
 
 PATTERNS = [
-    "(REL/P.{[sp][cora]x} ARG1/C ARG2 ARG3...)",
-    "(+/B.{m[ma]} (ARG1/C...) (ARG2/C...))",
+    # "(REL/P.{[sp][cora]x} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{scx} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{sox} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{srx} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{sax} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{pcx} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{pox} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{prx} ARG1/C ARG2 ARG3...)",
+    "(REL/P.{pax} ARG1/C ARG2 ARG3...)",
+    # "(+/B.{m[ma]} (ARG1/C...) (ARG2/C...))",
+    "(+/B.{ma} (ARG1/C...) (ARG2/C...))",
+    "(+/B.{mm} (ARG1/C...) (ARG2/C...))",
     "(REL1/P.{sx}-oc ARG1/C (REL2/T ARG2))",
     "(REL1/P.{px} ARG1/C (REL2/T ARG2))",
     "(REL1/P.{sc} ARG1/C (REL3/B REL2/C ARG2/C))",
