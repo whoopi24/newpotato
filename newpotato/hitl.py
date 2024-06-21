@@ -4,6 +4,7 @@ import os
 import pickle
 import random
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -11,11 +12,7 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 import stanza
 from graphbrain import hgraph
 from graphbrain.hyperedge import Atom, Hyperedge
-
-# from graphbrain.hypergraph import Hypergraph
-from graphbrain.learner.classifier import Classifier
 from graphbrain.learner.classifier import from_json as classifier_from_json
-from graphbrain.learner.pattern_ops import *
 from graphbrain.learner.rule import Rule
 from graphbrain.parsers import create_parser
 
@@ -23,6 +20,9 @@ from graphbrain.parsers import create_parser
 from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 from tuw_nlp.text.utils import gen_tsv_sens
 
+# from graphbrain.hypergraph import Hypergraph
+# from graphbrain.learner.classifier import Classifier
+from newpotato.classifier import Classifier
 from newpotato.datatypes import GraphParse, Triplet
 from newpotato.oie_patterns import *
 
@@ -30,6 +30,9 @@ from newpotato.oie_patterns import *
 # from newpotato.matcher import Matcher
 # from newpotato.counter import PatternCounter
 from newpotato.parser import TextParserClient
+
+# from graphbrain.learner.pattern_ops import *
+from newpotato.pattern_ops import *
 from newpotato.patterns import PatternCounter
 from newpotato.utils import matches2triplets
 
@@ -86,9 +89,15 @@ class Extractor:
             self.classifier.learn()
         else:
             print("learn is false")
+            start = time.time()
             self.classifier.extract_patterns()
-            print("extract patterns done!")
+            t = time.time() - start
+            print("extract patterns done; duration: ", t)
+
+            start = time.time()
             self.classifier._index_rules()
+            t = time.time() - start
+            print("indexing done; duration: ", t)
 
     def get_annotated_graphs_from_classifier(self) -> List[str]:
         """
@@ -657,6 +666,7 @@ class HITLManager:
             if sent == last_sent:
                 continue
             last_sent = sent
+            print(sent)
             parse_result = parser.parse(sent)
             for parse in parse_result["parses"]:
                 main_edge = parse["main_edge"]
@@ -810,12 +820,10 @@ class HITLManager:
         # transform hyperedges into abstract patterns
         pc = PatternCounter(
             expansions={
-                "(*/T */R)",
-                "(*/T */C)",
                 "(* * *)",
                 "(* * * *)",
             },
-            match_roots={"*/P", "*/C", "*/T", "*/B", "*/S"},
+            match_roots={"+/B"},
             count_subedges=False,
         )
 
@@ -831,14 +839,7 @@ class HITLManager:
     def generalise_graph(self, top_n=50, path="example.db"):
 
         # transform hyperedges into abstract patterns
-        pc = PatternCounter(
-            expansions={
-                "(* * *)",
-                "(* * * *)",
-            },
-            match_roots={"+/B"},
-            count_subedges=False,
-        )
+        pc = PatternCounter(count_subedges=False)
 
         # 1st version
         # for _, graph in self.parsed_graphs.items():
@@ -864,12 +865,17 @@ class HITLManager:
         #         pc.count(e)
 
         # 3rd version
-        for edge in self.get_annotated_graphs():
-            pc.count(edge)
+        # iter = 0
+        # for edge in self.get_annotated_graphs():
+        #     print(edge)
+        #     pc.count(edge)
+        #     iter += 1
+        #     if iter == max_items:
+        #         break
 
         # 4th version
-        # cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
-        # for edge in cases:
-        #     pc.count(edge)
+        cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
+        for edge in cases:
+            pc.count(edge)
 
         return pc.patterns.most_common(top_n)

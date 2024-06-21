@@ -843,6 +843,7 @@ def _edge2pattern(edge, root=False, subtype=False):
     ## START: MARINA
     elif contains_variable(edge):
         # print("var is contained")
+        # ToDo: what happens when two variables inside one hyperedge?
         if edge.contains("REL", deep=True):
             root_str = "REL"
         elif edge.contains("ARG0", deep=True):
