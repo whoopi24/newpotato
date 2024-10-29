@@ -1,16 +1,21 @@
-import itertools
+import collections
+import operator
 import logging
-from collections import defaultdict
-from typing import Any, Dict, List
+import re
+from functools import reduce
+from typing import Tuple
 
-from graphbrain.hyperedge import Hyperedge
+from stanza.models.common.doc import Sentence
 
-from newpotato.constants import NON_WORD_ATOMS
 from newpotato.datatypes import Triplet
 
 
-def print_tokens(sentence, hitl, console):
-    tokens = hitl.get_tokens(sentence)
+class AnnotatedWordsNotFoundError(Exception):
+    pass
+
+
+def print_tokens(sentence, extractor, console):
+    tokens = extractor.get_tokens(sentence)
     console.print("[bold cyan]Tokens:[/bold cyan]")
     console.print(" ".join(f"{i}_{tok}" for i, tok in enumerate(tokens)))
 
@@ -25,15 +30,19 @@ def _get_single_triplet_from_user(console):
 
     try:
         phrases = [
-            tuple(int(n) for n in ids.split("_")) for ids in annotation.split(",")
+            tuple(int(n) for n in ids.split("_")) if ids else None
+            for ids in annotation.split(",")
         ]
-        return phrases[0], phrases[1:]
+        pred = phrases[0]
+        args = [arg if arg is not None else () for arg in phrases[1:]]
+        return pred, args
+
     except ValueError:
         console.print("[bold red]Could not parse this:[/bold red]", annotation)
         return False
 
 
-def get_single_triplet_from_user(sentence, hitl, console, expect_mappable=True):
+def get_single_triplet_from_user(sentence, extractor, console, expect_mappable=True):
     console.print(
         """
         [bold cyan] Enter comma-separated list of predicate and args, with token IDs in each separated by underscores, e.g.: 0_The 1_boy 2_has 3_gone 4_to 5_school -> 2_3,0_1,4_5
@@ -42,22 +51,23 @@ def get_single_triplet_from_user(sentence, hitl, console, expect_mappable=True):
         
         [/bold cyan]"""
     )
-    graph = hitl.parsed_graphs[sentence]
     while True:
-        triplet = _get_single_triplet_from_user(console)
-        if triplet is None:
+        raw_triplet = _get_single_triplet_from_user(console)
+        if raw_triplet is None:
             # user is done
             return None
-        if triplet is False:
+        if raw_triplet is False:
             # syntax error
             continue
-        if triplet == "O":
+        if raw_triplet == "O":
             # oracle
             return "O"
 
-        pred, args = triplet
-        mapped_triplet = Triplet(pred, args, graph)
-        if expect_mappable and mapped_triplet.mapped is False:
+        pred, args = raw_triplet
+        graph = extractor.parsed_graphs[sentence]
+        triplet = Triplet(pred, args, toks=graph.tokens)
+        mapped_triplet = extractor.map_triplet(triplet, sentence)
+        if expect_mappable and mapped_triplet is False:
             console.print(
                 f"[bold red] Could not map annotation {triplet} to subedges, please provide alternative (or press ENTER to skip)[/bold red]"
             )
@@ -67,11 +77,11 @@ def get_single_triplet_from_user(sentence, hitl, console, expect_mappable=True):
 
 
 def get_triplets_from_user(sentence, hitl, console):
-    print_tokens(sentence, hitl, console)
+    print_tokens(sentence, hitl.extractor, console)
 
     while True:
-        triplet = get_single_triplet_from_user(sentence, hitl, console)
-        
+        triplet = get_single_triplet_from_user(sentence, hitl.extractor, console)
+
         if triplet is None:
             break
 
@@ -91,103 +101,130 @@ def get_triplets_from_user(sentence, hitl, console):
                     if triplet == "A":
                         hitl.store_triplet(sentence, o_triplet, is_true)
         else:
-            raise ValueError('get_single_triplet_from_user must return Triplet, None, "O", or "A"')
+            raise ValueError(
+                'get_single_triplet_from_user must return Triplet, None, "O", or "A"'
+            )
 
 
 def get_triplet_from_annotation(
-    pred, args, sen, sen_graph, hitl, console, ask_user=True
+    pred, args, sen, sen_graph, extractor, console, ask_user=True
 ):
-    triplet = Triplet(pred, args, sen_graph)
-    if not triplet.mapped:
+    toks = extractor.get_tokens(sen)
+    unmapped_triplet = Triplet(pred, args, toks)
+    triplet = extractor.map_triplet(unmapped_triplet, sen)
+    if triplet is False:
         console.print(
             f"[bold red]Could not map annotation {str(triplet)} to subedges)[/bold red]"
         )
         if not ask_user:
             console.print("[bold red]Returning unmapped triplet[/bold red]")
-            return triplet
+            return unmapped_triplet
 
         console.print(
             "[bold red]Please provide alternative (or press ENTER to skip)[/bold red]"
         )
-        print_tokens(sen, hitl, console)
-        triplet = get_single_triplet_from_user(sen, hitl, console)
+        print_tokens(sen, extractor, console)
+        triplet = get_single_triplet_from_user(sen, extractor, console)
         if triplet is None:
             console.print("[bold red]No triplet returned[/bold red]")
+
     return triplet
 
 
-def edge2toks(edge: Hyperedge, graph: Dict[str, Any]):
+def get_toks_from_txt(
+    words_txt: str, sen: Sentence, ignore_brackets: bool = False
+) -> Tuple[int, ...]:
     """
-    find IDs of tokens covered by an edge of a graph
-    If some atom names match more than one token, candidate token sequences are disambiguated
-    based on length and the shortest sequence (i.e. the one with the fewest gaps) is returned
+    Map a substring of a sentence to its tokens. Used to parse annotations of triplets
+    provided as plain text strings of the predicate and the arguments
 
     Args:
-        edge (Hyperedge): the Graphbrain Hyperedge to be mapped to token IDs
-        graph (Dict[str, Any]): the Graphbrain Hypergraph of the full utterance
+        words_txt (str): the substring of the sentence
+        sen (Sentence): stanza sentence
+        ignore_brackets (bool): whether to remove brackets from the text before matching (required for ORE annotation)
 
     Returns:
-        Tuple[int, ...]: tuple of token IDs covered by the subedge
+        Tuple[int, ...] the tokens of the sentence corresponding to the substring
     """
+    logging.debug(f"{words_txt=}, {sen.text=}")
+    logging.debug(
+        f"enumerated tokens: {[(i, tok.text) for i, tok in enumerate(sen.tokens)]}"
+    )
+    if ignore_brackets:
+        pattern = re.escape(re.sub('["()]', "", words_txt))
+    else:
+        pattern = re.escape(words_txt)
+    logging.debug(f"{pattern=}")
+    if pattern[0].isalpha():
+        pattern = r"\b" + pattern
+    if pattern[-1].isalpha():
+        pattern = pattern + r"\b"
+    m = re.search(pattern, sen.text, re.IGNORECASE)
 
-    logging.debug(f"edge2toks\n{edge=}\n{graph=}")
+    if m is None:
+        logging.warning(
+            f'Words "{words_txt}" (pattern: "{pattern}") not found in sentence "{sen.text}"'
+        )
+        raise AnnotatedWordsNotFoundError()
 
-    toks = set()
-    strs_to_atoms = defaultdict(list)
-    for atom, word in graph["atom2word"].items():
-        strs_to_atoms[atom.to_str()].append(atom)
+    start, end = m.span()
+    logging.debug(f"span: {(start, end)}")
 
-    to_disambiguate = []
-    for atom in edge.all_atoms():
-        atom_str = atom.to_str()
-        if atom_str not in strs_to_atoms:
-            assert (
-                str(atom) in NON_WORD_ATOMS
-            ), f"no token corresponding to {atom=} in {strs_to_atoms=}"
-        else:
-            cands = strs_to_atoms[atom_str]
-            if len(cands) == 1:
-                toks.add(graph["atom2word"][cands[0]][1])
-            else:
-                to_disambiguate.append([graph["atom2word"][cand][1] for cand in cands])
+    tok_i, tok_j = None, None
+    for i, token in enumerate(sen.tokens):
+        if token.start_char == start:
+            tok_i = i
+        if token.start_char >= end:
+            tok_j = i
+            break
+    if tok_i is None:
+        logging.warning(
+            f'left side of annotation "{words_txt}" does not match the left side of any token in sen "{sen.text}"'
+        )
+        raise AnnotatedWordsNotFoundError()
+    if tok_j is None:
+        tok_j = len(sen.tokens)
 
-    if len(to_disambiguate) > 0:
-        logging.debug(f"edge2toks disambiguation needed: {toks=}, {to_disambiguate=}")
-        hyp_sets = []
-        for cand in itertools.product(*to_disambiguate):
-            hyp_toks = sorted(toks | set(cand))
-            hyp_length = hyp_toks[-1] - hyp_toks[0]
-            hyp_sets.append((hyp_length, hyp_toks))
-
-        shortest_hyp = sorted(hyp_sets)[0][1]
-        logging.debug(f"{shortest_hyp=}")
-        return set(shortest_hyp)
-
-    return tuple(sorted(toks))
+    tok_ids_to_return = tuple(range(tok_i, tok_j))
+    logging.debug(f"{tok_ids_to_return=}")
+    return tok_ids_to_return
 
 
-def matches2triplets(matches: List[Dict], graph: Dict[str, Any]) -> List[Triplet]:
-    """
-    convert graphbrain matches on a sentence to triplets of the tokens of the sentence
+def is_power_of_two(n):
+    """Returns True iff n is a power of two.  Assumes n > 0."""
+    return (n & (n - 1)) == 0
 
-    Args:
-        matches (List[Dict]): a list of hypergraphs corresponding to the matches
-        graphs (Dict[str, Any]]): The hypergraph of the sentence
 
-    Returns:
-        List[Triplet] the list of triplets corresponding to the matches
-    """
-    triplets = []
-    for triple_dict in matches:
-        pred = []
-        args = []
-        for key, edge in triple_dict.items():
-            if key == "REL":
-                pred = edge2toks(edge, graph)
-            else:
-                args.append((int(key[-1]), edge2toks(edge, graph)))
-
-        sorted_args = [arg[1] for arg in sorted(args)]
-        triplets.append(Triplet(pred, sorted_args, graph))
-
-    return triplets
+def eliminate_subsets(sequence_of_sets):
+    """Return a list of the elements of `sequence_of_sets`, removing all
+    elements that are subsets of other elements.  Assumes that each
+    element is a set or frozenset and that no element is repeated.
+    Based on https://stackoverflow.com/a/14107790/2753770"""
+    # The code below does not handle the case of a sequence containing
+    # only the empty set, so let's just handle all easy cases now.
+    if len(sequence_of_sets) <= 1:
+        return list(sequence_of_sets)
+    # We need an indexable sequence so that we can use a bitmap to
+    # represent each set.
+    if not isinstance(sequence_of_sets, collections.abc.Sequence):
+        sequence_of_sets = list(sequence_of_sets)
+    # For each element, construct the list of all sets containing that
+    # element.
+    sets_containing_element = {}
+    for i, s in enumerate(sequence_of_sets):
+        for element in s:
+            try:
+                sets_containing_element[element] |= 1 << i
+            except KeyError:
+                sets_containing_element[element] = 1 << i
+    # For each set, if the intersection of all of the lists in which it is
+    # contained has length != 1, this set can be eliminated.
+    out = [
+        s
+        for s in sequence_of_sets
+        if s
+        and is_power_of_two(
+            reduce(operator.and_, (sets_containing_element[x] for x in s))
+        )
+    ]
+    return out
