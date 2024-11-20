@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 app = FastAPI()
-parser = GraphbrainParser()
+parser = GraphbrainParser(corefs=False)
 
 
 class TextToParse(BaseModel):
