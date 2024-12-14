@@ -9,11 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional  # , Tuple
 
-import stanza
-from graphbrain import hgraph
-from graphbrain.hyperedge import Atom, Hyperedge
-from graphbrain.learner.classifier import from_json as classifier_from_json
-from graphbrain.learner.rule import Rule
+from graphbrain.learner.classifier import apply_curly_brackets
 from graphbrain.parsers import create_parser
 from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
 from tuw_nlp.text.utils import gen_tsv_sens, tuple_if_list
@@ -260,7 +256,6 @@ class HITLManager:
         PATTERNS,
         extractions,
         max_items,
-        expect_mappable=True,
         input="lsoie_wiki_dev.conll",
     ):
         stream = open(input, "r", encoding="utf-8")
@@ -288,7 +283,7 @@ class HITLManager:
                 atom2word = parse["atom2word"]
                 if main_edge:
                     # print(f"{sent=}, {main_edge=}, {atom2word=}")
-                    information_extraction(
+                    information_extraction(  # in oie_patterns.py
                         extractions, main_edge, sen_idx, atom2word, PATTERNS
                     )
 
@@ -296,6 +291,112 @@ class HITLManager:
             iter += 1
 
         # return(extractions)
+
+    # function needed for functional patterns
+    def get_annotated_graphs(self) -> List[str]:
+        """
+        Get the annotated graphs.
+        """
+
+        return self.extractor.add_cases(self.text_to_triplets)
+
+        # self.extractor.add_cases(self.text_to_triplets)
+        # return self.extractor.get_annotated_graphs_from_classifier()
+
+    def generalise_graph(
+        self, top_n=50, method="supervised", check_vars=True, path="hg_test.db"
+    ):
+        # differentiate between supervised/unsupervised
+        if method == "unsupervised":
+            # 1st version: simple unsupervised approach
+            pc = PatternCounter(
+                expansions={
+                    "(* * *)",
+                    "(* * * *)",
+                },
+                match_roots={"+/B"},
+                count_subedges=False,
+            )
+            for _, graph in self.extractor.parsed_graphs.items():
+                edge = graph["main_edge"]
+                # exclusion of conjunctions
+                edges = conjunctions_decomposition(edge, concepts=True)
+                for e in edges:
+                    try:
+                        pc.count(e)
+                    except:
+                        continue
+
+            return pc.patterns
+
+        elif method == "supervised":
+
+            # 3rd version: uses functional patterns from parsed sentences with mapped triplets
+            # takes longer than 2nd version because all cases have to be added to classifier
+
+            patterns = Counter()
+            # TODO: conjunction decomposition, include special builder
+            for hyperedge in self.get_annotated_graphs():
+                # print(f"{edge=}")
+                hyperedge = hedge(hyperedge)
+                vars = all_variables(hyperedge)
+                # print(f"{vars.keys()=}")
+                if hyperedge.not_atom:
+                    # edges = conjunctions_decomposition(hyperedge, concepts=True)
+                    # print(f"{edges=}")
+                    # for edge in edges:
+                    # vars2 = all_variables(edge)
+                    # if len(vars) == len(vars2):
+                    pattern = generalise_edge(hyperedge)
+                    # print(f"{pattern=}")
+                    if pattern is None:
+                        print("skipped")
+                        continue
+                    elif check_vars:
+                        skip = False
+                        atoms = pattern.atoms()
+                        roots = {atom.root() for atom in atoms}
+                        for var in vars:
+                            # make sure to include all variables in the final pattern
+                            if str(var) in roots:
+                                continue
+                            else:
+                                print("skipped")
+                                skip = True
+                                break
+                        if not skip:
+                            print("count: ", pattern)
+                            patterns[hedge(apply_curly_brackets(pattern))] += 1
+                    else:
+                        patterns[hedge(apply_curly_brackets(pattern))] += 1
+
+            return patterns
+
+            # 4th version - not tested!
+            # cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
+            # for edge in cases:
+            #     pc.count(edge)
+
+            # 2nd version (https://graphbrain.net/tutorials/hypergraph-operations.html#parse-sentence-and-add-hyperedge-to-hypergraph)
+            # takes longer than 1st version with the use of an existing hg (with manipulated edges)
+            # necessary to set replace_yn=True when executing lsoie_gb.py
+            # not done yet !!
+            # pc = PatternCounter(
+            #     expansions={
+            #         "(* * *)",
+            #         "(* * * *)",
+            #     },
+            #     # match_roots={"+/B"},
+            #     count_subedges=False,
+            # )
+            # hg = hgraph(path)
+            # for edge in hg.all():
+            #     if hg.is_primary(edge):
+            #         pc.count(edge)
+
+        else:
+            print("Invalid method!")
+            return Counter()
 
     # def generalise_graph_v2(self, hg, top_n=50):
 
@@ -318,49 +419,128 @@ class HITLManager:
 
     #     return pc.patterns.most_common(top_n)
 
-    def generalise_graph(self, top_n=50, path="hg_test.db"):
 
-        # transform hyperedges into abstract patterns
-        pc = PatternCounter(
-            expansions={
-                "(* * *)",
-                "(* * * *)",
-            },
-            # match_roots={"+/B"},
-            count_subedges=False,
-        )
+def extract_top_level_elements(hyperedge):
+    elements = []
+    stack = []
+    start_idx = 0
 
-        # 1st version
-        # for _, graph in self.extractor.parsed_graphs.items():
-        #     edge = graph["main_edge"]
-        #     # exclusion of conjunctions
-        #     edges = conjunctions_decomposition(edge, concepts=True)
-        #     for e in edges:
-        #         try:
-        #             pc.count(e)
-        #         except:
-        #             continue
+    str_edge = str(hyperedge)
 
-        # 2nd version (https://graphbrain.net/tutorials/hypergraph-operations.html#parse-sentence-and-add-hyperedge-to-hypergraph)
-        # takes longer than 1st version
-        # if os.path.exists(path):
-        #     os.remove(path)
-        # hg = hgraph(path)
-        # for _, graph in self.extractor.parsed_graphs.items():
-        #     edge = graph["main_edge"]
-        #     # exclusion of conjunctions
-        #     edges = conjunctions_decomposition(edge, concepts=True)
-        #     for e in edges:
-        #         hg.add(e)
+    # remove outermost parentheses
+    if str_edge.startswith("(") and str_edge.endswith(")"):
+        str_edge = str_edge[1:-1]
 
-        # for e in hg.all():
-        #     if hg.is_primary(e):  # works and removes duplicated patterns
-        #         pc.count(e)
+    for idx, char in enumerate(str_edge):
+        if char == "(":
+            if not stack:
+                start_idx = idx  # start of a top-level element
+            stack.append(char)
+        elif char == ")":
+            stack.pop()
+            if not stack:  # end of a top-level element
+                element = str_edge[start_idx : idx + 1]
+                elements.append(element)
 
-        # 3rd version: use existing hg object
-        hg = hgraph(path)
-        for edge in hg.all():
-            if hg.is_primary(edge):
-                pc.count(edge)
+    return elements
 
-        return pc.patterns.most_common(top_n)
+
+def extract_second_level(hyperedge):
+    top_level_elements = extract_top_level_elements(hyperedge)
+    second_level = []
+    # only consider relations of sizes 3 or 4
+    if len(top_level_elements) > 4:
+        # print("too many relations")
+        return second_level
+    # if len(top_level_elements) < 3:
+    #     print("not enough relations")
+    #     print(top_level_elements)
+    #     return second_level
+
+    for element in top_level_elements:
+        # keep "var" objects intact
+        if element.startswith("(var"):
+            second_level.append(element)
+        else:
+            # check for nested components
+            nested_elements = extract_top_level_elements(element)
+            # only unnest multiple components
+            if len(nested_elements) > 1:
+                second_level.append(nested_elements)
+            else:
+                second_level.append(element)
+
+    return second_level
+
+
+def edge2pattern(edge, root=False, subtype=False):
+    # print("edge2pattern-e: ", edge)
+    if root and edge.atom:
+        root_str = edge.root()
+    elif contains_variable(edge):
+        # print("contains var")
+        # count the number of unique variables
+        var_cnt = len(re.findall(r"\bvar\b", str(edge)))
+        if var_cnt > 1:
+            print("multiple vars")
+            print("edge2pattern-e: ", edge)
+            # at least two variables in second level hyperedge - does not meet conditions
+            return None
+        elif edge.contains("REL", deep=True):
+            root_str = "REL"
+        elif edge.contains("ARG0", deep=True):
+            root_str = "ARG0"
+        elif edge.contains("ARG1", deep=True):
+            root_str = "ARG1"
+        elif edge.contains("ARG2", deep=True):
+            root_str = "ARG2"
+        elif edge.contains("ARG3", deep=True):
+            root_str = "ARG3"
+        elif edge.contains("ARG4", deep=True):
+            root_str = "ARG4"
+        elif edge.contains("ARG5", deep=True):
+            root_str = "ARG5"
+        else:
+            # print("other problem")
+            root_str = "*"
+    else:
+        root_str = "*"
+    if subtype:
+        et = edge.type()
+    else:
+        et = edge.mtype()
+    pattern = "{}/{}".format(root_str, et)
+    ar = edge.argroles()
+    if ar == "":
+        # print("edge2pattern-p: ", hedge(pattern))
+        return hedge(pattern)
+    else:
+        # print("edge2pattern-p: ", hedge("{}.{}".format(pattern, ar)))
+        return hedge("{}.{}".format(pattern, ar))
+
+
+def generalise_edge(hyperedge):
+    second_level_result = extract_second_level(hyperedge)
+    # print(f"{second_level_result=}")
+    if len(second_level_result) == 0:
+        return None
+    final_result = []
+    for item in second_level_result:
+        if type(item) == list:
+            for i in item:
+                # print(f"{i=}")
+                newitem = edge2pattern(hedge(i))
+                # print(f"{newitem=}")
+                if newitem is not None:
+                    final_result.append(str(newitem))
+        else:
+            # print(f"{item=}")
+            newitem = edge2pattern(hedge(item))
+            # print(f"{newitem=}")
+            if newitem is not None:
+                final_result.append(str(newitem))
+
+    if None not in final_result:
+        return hedge(" ".join(final_result))
+    else:
+        return None
