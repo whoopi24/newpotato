@@ -12,6 +12,7 @@ from newpotato.constants import NON_ATOM_WORDS, NON_WORD_ATOMS
 from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
 from newpotato.extractors.graphbrain_parser import GraphbrainParserClient, GraphParse
+from newpotato.modifications.pattern_ops import apply_variable, apply_variables
 
 
 def edge2toks(edge: Hyperedge, graph: Dict[str, Any]):
@@ -349,36 +350,21 @@ class GraphbrainExtractor(Extractor):
             parsed_graphs (Dict[str, Dict[str, Any]]): The parsed graphs.
             text_to_triplets (Dict[str, List[Tuple]]): The texts and corresponding triplets.
         """
-        classifier = Classifier()
+
+        cases = []
+
         for text, triplets in text_to_triplets.items():
             graph = self.parsed_graphs[text]
             main_edge = graph["main_edge"]
             for triplet, positive in triplets:
-                if not isinstance(triplet, GraphbrainMappedTriplet):
-                    logging.warning(
-                        f"trying to map unmapped triplet {triplet} to {main_edge}"  # {triplet} to {graph}
-                    )
-                    mapped_triplet = self.map_triplet(triplet, text)
-                    if not mapped_triplet:
-                        logging.warning("failed to map triplet, skipping")
-                        continue
+                vedge = apply_variables(main_edge, variables=triplet.variables)
+                if vedge is None:
+                    logging.debug("failed to add case.")
+                    continue
                 else:
-                    mapped_triplet = triplet
+                    cases.append((vedge, positive))
 
-                logging.info("adding case:")
-                logging.info(f"{text=}")
-                # logging.info(f"{text=}, {main_edge=}")
-                # logging.info(
-                #     f"{mapped_triplet=}, {mapped_triplet.variables=}, positive: {positive}"
-                # )
-
-                # positive means whether we want to treat it as a positive or negative example
-                # this helps graphbrain to learn the rules
-                classifier.add_case(
-                    main_edge, positive=positive, variables=mapped_triplet.variables
-                )
-
-        self.classifier = classifier
+        return cases
 
     def classify(self, graph: Hyperedge) -> Tuple[List[Dict[str, Any]], List[str]]:
         """
