@@ -94,7 +94,13 @@ def load_and_map_lsoie(input_file, extractor, replace_yn=False, path="hg_test.db
                 logging.error(f"{skipped=}, {total=}")
                 continue
 
-            graph = text_to_graph[sentence]["main_edge"]
+            try:
+                graph = text_to_graph[sentence]["main_edge"]
+            except:
+                logging.error(f"{text_to_graph=}")
+                logging.error("skipping")
+                skipped += 1
+                continue
             logging.debug(f"{sentence=}, {graph=}")
 
             arg_dict = defaultdict(list)
@@ -127,7 +133,14 @@ def load_and_map_lsoie(input_file, extractor, replace_yn=False, path="hg_test.db
                 logging.error(f"{skipped=}, {total=}")
                 continue
 
-            hg.add(graph)
+            # print(mapped_triplet.variables)
+            # mapped_triplet.variables:
+            # {'REL': dissolved/Pd.xso.<f-----/en,
+            # 'ARG0': ('s/Bp.am/en (the/Md/en country/Cc.s/en) parliament/Cc.s/en),
+            # 'ARG1': (+/B.mm/. ('s/Bp.am/en thailand/Cp.s/en (+/B.am/. prime/Cp.s/en minister/Cp.s/en)) (+/B.am/. yingluck/Cp.s/en shinawatra/Cp.s/en)),
+            # 'ARG2': (earlier/M=/en today/Cc.s/en),
+            # 'ARG3': formally/M/en}
+
             if replace_yn:
                 newedge = graph
                 # print(newedge)
@@ -150,11 +163,11 @@ def load_and_map_lsoie(input_file, extractor, replace_yn=False, path="hg_test.db
                         )
                     count += 1
                 # print(newedge)
-                arg_cnt = len(args)
 
                 # exclusion of conjunctions
                 edges = conjunctions_decomposition(newedge, concepts=True)
                 # only add new edge to hg if all annotations are included
+                arg_cnt = len(args)
                 for newedge in edges:
                     # find roots with ARG
                     roots = {atom.root() for atom in newedge.atoms()}
@@ -166,20 +179,20 @@ def load_and_map_lsoie(input_file, extractor, replace_yn=False, path="hg_test.db
                         newedge = newedge.simplify(
                             subtypes=False, argroles=False, namespaces=False
                         )
-                        # subedges = extract_subedges(newedge)
+                        subedges = extract_subedges(newedge)
                         # print(subedges)
 
                         # save new edge with annotations
                         hg.add(newedge)
+
+                        # save patterns (use count or sth similar)
                     else:
                         # print("skipped")
                         continue
 
                 # TODO: how to re-build entire hyperedge again after replacing several subedges?
                 # TODO: unite atoms with equal annotations
-                # subedges = newedge.simplify(
-                #     subtypes=False, argroles=False, namespaces=False
-                # ).subedges()
+                # subedges = newedge.subedges()
                 # for se in subedges:
                 #     if se.atom:
                 #         continue
@@ -189,16 +202,19 @@ def load_and_map_lsoie(input_file, extractor, replace_yn=False, path="hg_test.db
                 #     if len(set(roots)) == 1:
                 #         print("can be united")
                 #         print(se.type()) # or mtype() ??
-                #         newatom = roots[0] + "/" + se.type()
+                #         newatom = roots[0] + "/" + se.mtype()
                 #         newedge = se.replace_atom(se, newatom, unique=False)
                 #         print(newatom)
                 #         print(newedge)
 
+            else:
+                hg.add(graph)
+
             yield sentence, mapped_triplet
 
 
-def load_lsoie_to_hitl(input_file, hitl):
-    for sen, triplet in load_and_map_lsoie(input_file, hitl.extractor, True):
+def load_lsoie_to_hitl(input_file, hitl, replace_yn):
+    for sen, triplet in load_and_map_lsoie(input_file, hitl.extractor, replace_yn):
         hitl.store_triplet(sen, triplet, True)
 
 
@@ -208,6 +224,7 @@ def get_args():
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-i", "--input_file", default=None, type=str)
     parser.add_argument("-s", "--state_file", default=None, type=str)
+    parser.add_argument("-r", "--replace", default=False, type=bool)
     return parser.parse_args()
 
 
@@ -226,7 +243,7 @@ def main():
     console.print("initializing HITL session")
     hitl = HITLManager(extractor_type="graphbrain")
     console.print(f"loading LSOIE data from {args.input_file}")
-    load_lsoie_to_hitl(args.input_file, hitl)
+    load_lsoie_to_hitl(args.input_file, hitl, args.replace)
     console.print(f"saving HITL session to {args.state_file}")
     hitl.save(args.state_file)
 
