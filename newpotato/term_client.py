@@ -8,8 +8,8 @@ from rich.table import Table
 from tqdm import tqdm
 
 from newpotato.evaluate.eval_hitl import HITLEvaluator
-from newpotato.hitl import HITLManager
-from newpotato.oie_patterns import *
+from newpotato.hitl_marina import HITLManager
+from newpotato.modifications.oie_patterns import *
 from newpotato.utils import get_triplets_from_user, print_tokens
 
 console = Console()
@@ -223,7 +223,7 @@ class NPTerminalClient:
                 )
                 return
 
-    def evaluate_oie_patterns(self):
+    def evaluate_oie_patterns(self, patterns):
 
         # Graphbrain
         # PATTERNS = [
@@ -263,26 +263,23 @@ class NPTerminalClient:
         #     "(* (any ((var */P.{sc} REL) (var * ARG0) (var * ARG1)) *) (any (*/P.{or} (var * ARG0) ((var */P.{x} REL) *)) *))",
         # ]
 
-        # test
-        PATTERNS = [
-            "(*/P.{px} ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
-            "((*/M */P.{px}) ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
-        ]
+        # # test
+        # PATTERNS = [
+        #     "(*/P.{px} ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
+        #     "((*/M */P.{px}) ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
+        # ]
 
-        DIR = "LSOIE/data"
         input = "lsoie_wiki_dev.conll"
-        output = input.split(".")[0] + "eval.json"
         extractions = {}
 
         self.hitl.parse_sent_with_ann_eval(
-            PATTERNS,
+            patterns,
             extractions,
             max_items=10,
-            expect_mappable=True,
             input=input,
         )
 
-        # print(extractions)
+        print(extractions)
 
         for _, extraction in extractions.items():
             print("extraction: ", extraction)
@@ -298,44 +295,34 @@ class NPTerminalClient:
 
     def run_oie(self):
 
-        # self.evaluate_oie_patterns()
+        # # unsupervised rule learning
+        # top_n = 50
+        # pc = self.hitl.generalise_graph(top_n, method="unsupervised")
+        # print(pc)
+        # top_patterns = pc.most_common(top_n)
 
-        # if self.hitl.parsed_graphs == {}:
-        #     console.print(
-        #         "[bold red]That choice requires parsed sentences, run (S)entence or (U)pload first![/bold red]"
-        #     )
-        # else:
+        # # get simplified patterns
+        # simple_patterns, total_cnt = simplify_patterns(top_patterns, strict=False)
+        # print(simple_patterns)
+        # print("Total count: ", total_cnt)
 
-        # self.hitl.parse_sent_with_annotations(
-        #     max_items=200, input="lsoie_wiki_train_small.conll", output="test11.pkl"
-        # )
+        # # save patterns in a text file
+        # self.save_oie_file(top_patterns)
+        # self.save_oie_file(simple_patterns)
 
-        # hg = self.hitl.parse_sent_with_annotations_v2(
-        #     max_items=60, input="output.pkl", path="ex.db"
-        # )
-        # patterns = self.hitl.generalise_graph_v2(hg=hg, top_n=100)
-
-        # if self.hitl.extractor.classifier is None:
-        #     console.print(
-        #         "[bold red]That choice requires a classifier, run (R)ules first![/bold red]"
-        #     )
-        #     return False
-
-        # get generalised patterns
-        patterns = self.hitl.generalise_graph(top_n=50, path="p_dev.db")
-        print(patterns)
-        # print("save patterns:")
-        # self.save_oie_file(patterns)
-
+        # open saved oie patterns file
         # f = open("p_train.txt", "r")
         # patterns = f.read()
-        # print(f.read())
 
-        # get simplified patterns
-        # simple_patterns = simplify_patterns(patterns, strict=True)
-        # print(simple_patterns)
-        # print("save simplified patterns:")
-        # self.save_oie_file(simple_patterns)
+        # supervised rule learning
+        top_n = 20
+        pc = self.hitl.generalise_graph(top_n, method="supervised")
+        patterns = [key for key, _ in pc.most_common(top_n)]
+        print(patterns)
+
+        # TODO: parse LSOIE test data
+        # evaluate patterns on unseen data
+        # self.evaluate_oie_patterns(patterns)
 
         return print("Work in progress.")
 
