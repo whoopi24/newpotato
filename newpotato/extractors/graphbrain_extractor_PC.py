@@ -214,6 +214,15 @@ def toks2subedge(
         raise UnmappableTripletError()
 
 
+def flatten_and_join_list(value):
+    if isinstance(value, list):
+        # special case: single element without parentheses
+        if len(value) == 1:
+            return flatten_and_join_list(value[0])
+        return f"({' '.join(flatten_and_join_list(item) for item in value)})"
+    return value  # return non-list value as-is
+
+
 class GraphbrainMappedTriplet(Triplet):
     def __init__(
         self, mapped_pred, mapped_args, toks=None, variables=None, sen_graph=None
@@ -223,6 +232,21 @@ class GraphbrainMappedTriplet(Triplet):
         self.variables = variables
         self.sen_graph = sen_graph
         self.mapped = True
+
+    @staticmethod
+    def from_json(data):
+        if data["type"] == "triplet":
+            print()
+            return GraphbrainMappedTriplet(
+                data["pred"], data["args"], variables=data["variables"]
+            )
+        else:
+            raise ValueError(data["type"])
+
+    def to_json(self):
+        superclass_dict = super(GraphbrainMappedTriplet, self).to_json()
+        superclass_dict["variables"] = self.variables
+        return superclass_dict
 
 
 class GraphbrainExtractor(Extractor):
@@ -354,10 +378,18 @@ class GraphbrainExtractor(Extractor):
         cases = []
 
         for text, triplets in text_to_triplets.items():
+            # print(f"{text=}")
             graph = self.parsed_graphs[text]
             main_edge = graph["main_edge"]
             for triplet, positive in triplets:
-                vedge = apply_variables(main_edge, variables=triplet.variables)
+                # print(f"{triplet.variables=}")
+                variables = {
+                    key: hedge(flatten_and_join_list(value))
+                    for key, value in triplet.variables.items()
+                }
+                # print(f"{variables=}")
+                vedge = apply_variables(main_edge, variables)
+                # print(f"{vedge=}")
                 if vedge is None:
                     logging.debug("failed to add case.")
                     continue

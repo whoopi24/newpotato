@@ -16,6 +16,7 @@ from tuw_nlp.text.utils import gen_tsv_sens, tuple_if_list
 
 from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
+from newpotato.extractors.graphbrain_extractor_PC import GraphbrainMappedTriplet
 
 # from newpotato.modifications.classifier import Classifier
 from newpotato.modifications.oie_patterns import *
@@ -65,7 +66,7 @@ class HITLManager:
         text_to_triplets = {
             tuple_if_list(item["text"]): [
                 (
-                    Triplet.from_json(triplet[0]),
+                    GraphbrainMappedTriplet.from_json(triplet[0]),
                     triplet[1],
                 )
                 for triplet in item["triplets"]
@@ -253,7 +254,7 @@ class HITLManager:
     # my own functions
     def parse_sent_with_ann_eval(
         self,
-        PATTERNS,
+        patterns,
         extractions,
         max_items,
         input="lsoie_wiki_dev.conll",
@@ -284,7 +285,7 @@ class HITLManager:
                 if main_edge:
                     # print(f"{sent=}, {main_edge=}, {atom2word=}")
                     information_extraction(  # in oie_patterns.py
-                        extractions, main_edge, sen_idx, atom2word, PATTERNS
+                        extractions, main_edge, sen_idx, atom2word, patterns
                     )
 
             # next round
@@ -333,12 +334,14 @@ class HITLManager:
 
             # 3rd version: uses functional patterns from parsed sentences with mapped triplets
             # takes longer than 2nd version because all cases have to be added to classifier
+            # UPDATE: removed adding the cases to the classifier and double parsing
 
             patterns = Counter()
             # TODO: conjunction decomposition, include special builder
+            # TODO: for hyperedge, positive in self.get_annotated_graphs(): -> what is more correct?
             for hyperedge in self.get_annotated_graphs():
-                # print(f"{edge=}")
                 hyperedge = hedge(hyperedge)
+                # print(f"{hyperedge=}")
                 vars = all_variables(hyperedge)
                 # print(f"{vars.keys()=}")
                 if hyperedge.not_atom:
@@ -350,7 +353,7 @@ class HITLManager:
                     pattern = generalise_edge(hyperedge)
                     # print(f"{pattern=}")
                     if pattern is None:
-                        print("skipped")
+                        # print("skipped - no pattern")
                         continue
                     elif check_vars:
                         skip = False
@@ -361,13 +364,16 @@ class HITLManager:
                             if str(var) in roots:
                                 continue
                             else:
-                                print("skipped")
+                                # print("skipped - var missing")
                                 skip = True
                                 break
                         if not skip:
+                            # if not positive:
+                            #     print(f"{hyperedge=}")
                             print("count: ", pattern)
                             patterns[hedge(apply_curly_brackets(pattern))] += 1
                     else:
+                        print("count: ", pattern)
                         patterns[hedge(apply_curly_brackets(pattern))] += 1
 
             return patterns
@@ -482,8 +488,8 @@ def edge2pattern(edge, root=False, subtype=False):
         # count the number of unique variables
         var_cnt = len(re.findall(r"\bvar\b", str(edge)))
         if var_cnt > 1:
-            print("multiple vars")
-            print("edge2pattern-e: ", edge)
+            # print("multiple vars")
+            # print("edge2pattern-e: ", edge)
             # at least two variables in second level hyperedge - does not meet conditions
             return None
         elif edge.contains("REL", deep=True):
@@ -519,6 +525,9 @@ def edge2pattern(edge, root=False, subtype=False):
         return hedge("{}.{}".format(pattern, ar))
 
 
+# function to generalise each hyperedge with functional patterns
+# generalisation approach: using var as root and adding main type (mtype) of edge after /
+# only consider recursive expansion to depth 2 for simplicity
 def generalise_edge(hyperedge):
     second_level_result = extract_second_level(hyperedge)
     # print(f"{second_level_result=}")
