@@ -42,10 +42,6 @@ def main():
         "A5": "arg6",
     }
 
-    # TODO: how to handle arguments which belong to "arg3+" ?
-    # intuitive approach: add A2-A5 to arg3+
-    # but for now: just ignore A3-A5
-
     if args.output_file:
         fn = args.output_file
     else:
@@ -78,6 +74,9 @@ def main():
                                 arg3to6.append(tup[key])
                                 # remove original key
                                 del tup[key]
+                        # add arg2 if missing
+                        if "arg2" not in tup:
+                            tup["arg2"] = {"words": [], "words_indexes": []}
                         # add combined keys or empty list
                         tup["arg3+"] = arg3to6
                         tuples_list.append(tup)
