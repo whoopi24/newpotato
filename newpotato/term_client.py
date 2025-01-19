@@ -31,6 +31,7 @@ class NPTerminalClient:
                 )
                 return
 
+    # TODO: cannot find self.hitl.extractor.save_patterns(fn)
     def write_patterns_to_file(self):
         while True:
             console.print("[bold cyan]Enter path to patterns file:[/bold cyan]")
@@ -138,12 +139,24 @@ class NPTerminalClient:
         console.print(table)
 
     def evaluate(self, fn=None):
-        evaluator = HITLEvaluator(self.hitl)
-        results = evaluator.get_results()
-        for key, value in results.items():
-            console.print(f"{key}: {value}")
+        # evaluator = HITLEvaluator(self.hitl)
+        # results = evaluator.get_results()
+        # for key, value in results.items():
+        #     console.print(f"{key}: {value}")
+        # if fn:
+        #     evaluator.write_events_to_file(fn)
+
+        # evaluate patterns on unseen data
+        # TODO: hardcoded patterns file
+        self.hitl.extractor.load_patterns("p_lsoie_train.txt")
         if fn:
-            evaluator.write_events_to_file(fn)
+            self.evaluate_oie_patterns(
+                self.hitl.extractor.patterns, input="lsoie_wiki_dev.conll", output=fn
+            )
+        else:
+            self.evaluate_oie_patterns(
+                self.hitl.extractor.patterns, input="lsoie_wiki_dev.conll"
+            )
 
     def print_graphs(self):
         table = Table(show_header=True, header_style="bold magenta")
@@ -215,6 +228,10 @@ class NPTerminalClient:
                 with open(fn, "w") as f:
                     for line in obj:
                         f.write(f"{line}\n")
+
+                # with open(fn, "w") as f:
+                #     # indent=2 makes the file human-readable if the data is nested (optional)
+                #     json.dump(obj, f, indent=2)
             except FileNotFoundError:
                 console.print(f"[bold red] No such file or directory: {fn}[/bold red]")
             else:
@@ -223,9 +240,11 @@ class NPTerminalClient:
                 )
                 return
 
-    def evaluate_oie_patterns(self, patterns):
+    def evaluate_oie_patterns(
+        self, patterns, input="lsoie_wiki_dev.conll", output="lsoie_wiki_dev_pred.json"
+    ):
 
-        # Graphbrain
+        # Graphbrain paper (table 6 on page 17)
         # PATTERNS = [
         #     "(REL/P.{scx} ARG1/C ARG2 ARG3...)",
         #     "(REL/P.{sox} ARG1/C ARG2 ARG3...)",
@@ -242,7 +261,7 @@ class NPTerminalClient:
         #     "(REL1/P.{sc} ARG1/C (REL3/B REL2/C ARG2/C))",
         # ]
 
-        # Top10 LSOIE train - add {} around argroles to find more matches
+        # Top10 LSOIE train - add {} around argroles to find more matches - OLD
         # PATTERNS = [
         #     "(REL/P.{px} ARG0 ARG1)",
         #     "((*/M REL/P.{px}) ARG0 ARG1)",
@@ -252,7 +271,7 @@ class NPTerminalClient:
         #     "(REL/P.{sox} ARG0 ARG1 ARG2...)",
         # ]
 
-        # patterns with variables
+        # patterns with variables from learner/classifier - NOT USEABLE
         # PATTERNS = [
         #     "(*/P.{ox} (*/B.{mm} (var * ARG0) (var * REL)) (* (*/B.{mm} * (var * ARG1))))",
         #     "((var */P.{sxx} REL) (var * ARG0) (var * ARG2) (var * ARG1))",
@@ -263,37 +282,50 @@ class NPTerminalClient:
         #     "(* (any ((var */P.{sc} REL) (var * ARG0) (var * ARG1)) *) (any (*/P.{or} (var * ARG0) ((var */P.{x} REL) *)) *))",
         # ]
 
-        # # test
+        # test
         # PATTERNS = [
         #     "(*/P.{px} ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
         #     "((*/M */P.{px}) ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
         # ]
 
-        input = "lsoie_wiki_dev.conll"
+        # Directories & files
+        DIR = "WiRe57/data"
+        EXTR_MANUAL = "WiRe57_343-manual-oie.json"
+        EXTR_BEFORE = (
+            "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
+            "reverb_props-export.json"
+        )
+        EXTR_AFTER = "test-export.json"
+
+        # manual = json.load(open("{}/{}".format(DIR, EXTR_MANUAL)))
+        # extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
         extractions = {}
 
+        # TODO: change format of manual (LSOIE format needed)
         self.hitl.parse_sent_with_ann_eval(
             patterns,
             extractions,
-            max_items=10,
+            max_items=100000,
             input=input,
         )
 
-        print(extractions)
-
-        for _, extraction in extractions.items():
-            print("extraction: ", extraction)
-
-        # ToDo: compare extraction with annotations
-
+        # add SH extractions to extr file (extractions from other OIE systems)
         # for _, extraction in extractions.items():
-        #     print("extraction: ", extraction)
+        #     print(f"{extraction=}")
         #     extr[extraction["sent_id"]].append(extraction["data"])
 
-        # with open("{}/{}".format(DIR, EXTR_AFTER), "w", encoding="utf-8") as f:
-        #     json.dump(extr, f, ensure_ascii=False, indent=4)
+        # saving extractions
+        # output = "{}/{}".format(DIR, EXTR_AFTER)
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(extractions, f, ensure_ascii=False, indent=4)
+
+        # number of predicted sentences
+        pred_sent_cnt = len(extractions)
 
     def run_oie(self):
+        # get status data
+        status = self.hitl.get_status()
+        total_cnt = status["n_annotated"]
 
         # # unsupervised rule learning
         # top_n = 50
@@ -316,13 +348,22 @@ class NPTerminalClient:
 
         # supervised rule learning
         top_n = 20
-        pc = self.hitl.generalise_graph(top_n, method="supervised")
+        pc = self.hitl.generalise_graph(top_n, method="supervised", check_vars=True)
+        # print(pc.most_common(top_n))
         patterns = [key for key, _ in pc.most_common(top_n)]
         print(patterns)
 
-        # TODO: parse LSOIE test data
-        # evaluate patterns on unseen data
-        # self.evaluate_oie_patterns(patterns)
+        # save patterns in a text file
+        self.save_oie_file(patterns)
+
+        # needed for HITLEvaluator
+        # self.hitl.extractor.patterns = patterns
+
+        pattern_cnt = sum(pc.values())
+        print(f"{pattern_cnt=}")
+        print(
+            f"{pattern_cnt/total_cnt:.2%} of annotated sentences have a pattern"
+        )  # not exactly because of multiple patterns per sentence
 
         return print("Work in progress.")
 
