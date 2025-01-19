@@ -13,6 +13,12 @@ from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
 from newpotato.extractors.graphbrain_parser import GraphbrainParserClient, GraphParse
 from newpotato.modifications.pattern_ops import apply_variable, apply_variables
+from newpotato.modifications.patterns import _matches_atomic_pattern, match_pattern
+
+# def evaluate_combination(args):
+#     toks, candidate = args
+#     hyp_toks = toks | set(candidate)
+#     return max(hyp_toks) - min(hyp_toks), sorted(hyp_toks)
 
 
 def edge2toks(edge: Hyperedge, graph: Dict[str, Any]):
@@ -50,8 +56,22 @@ def edge2toks(edge: Hyperedge, graph: Dict[str, Any]):
             else:
                 to_disambiguate.append([graph["atom2word"][cand][1] for cand in cands])
 
+    # added solution for CPU memory issue with sorting (too many combinations)
     if len(to_disambiguate) > 0:
         logging.debug(f"edge2toks disambiguation needed: {toks=}, {to_disambiguate=}")
+        # check number of combinations
+        total_combinations = 1
+        for lst in to_disambiguate:
+            total_combinations *= len(lst)
+
+        # skip computation if combinations exceed threshold
+        COMBINATIONS_THRESHOLD = 10_000_000
+        if total_combinations > COMBINATIONS_THRESHOLD:
+            logging.error(f"too many combinations: {total_combinations}")
+            logging.error("skipping")
+            # TODO: count skipped cases and log them for further investigation -> not easy
+            return set()
+
         hyp_sets = []
         for cand in itertools.product(*to_disambiguate):
             hyp_toks = sorted(toks | set(cand))
@@ -63,6 +83,64 @@ def edge2toks(edge: Hyperedge, graph: Dict[str, Any]):
         return set(shortest_hyp)
 
     return tuple(sorted(toks))
+
+
+# # possible ideas for optimization
+# import heapq
+# # special case: toks is empty set -> problems with min, max
+# if not toks:
+#     # choose smallest token from each group in `to_disambiguate`
+#     smallest_tokens = {min(cand) for cand in to_disambiguate}
+#     logging.debug(
+#         f"Disambiguation resolved by choosing smallest tokens: {smallest_tokens}"
+#     )
+#     return tuple(sorted(smallest_tokens))
+
+# # Step 1: Filter to_disambiguate (top-k candidates)
+# k = 3
+# filtered_disambiguate = []
+# for lst in to_disambiguate:
+#     filtered_lst = sorted(lst, key=lambda x: min(abs(x - t) for t in toks))[:k]
+#     filtered_disambiguate.append(filtered_lst)
+
+# # pre-filter candidates
+# toks_min, toks_max = min(toks), max(toks)
+# max_distance = 5  # adjust as needed based on your data characteristics
+# filtered_disambiguate = [
+#     [
+#         x
+#         for x in sublist
+#         if toks_min - max_distance <= x <= toks_max + max_distance
+#     ]
+#     for sublist in to_disambiguate
+# ]
+
+# # Set up a limited heap
+# max_heap_size = 5_000  # Limit heap size for performance
+# heap = []
+
+# for cand in itertools.product(*filtered_disambiguate):
+#     hyp_toks = toks | set(cand)
+#     hyp_length = max(hyp_toks) - min(hyp_toks)
+
+#     # Add to the heap and maintain its size
+#     if len(heap) < max_heap_size:
+#         heapq.heappush(heap, (hyp_length, sorted(hyp_toks)))
+#     else:
+#         heapq.heappushpop(heap, (hyp_length, sorted(hyp_toks)))
+# shortest_hyp = min(heap, key=lambda x: x[0])[1]
+
+# # Step 2: Parallelize combination evaluation -> makes process very slow
+# with Pool(processes=8) as pool:  # Adjust processes as needed
+#     results = pool.map(
+#         evaluate_combination,
+#         [(toks, cand) for cand in itertools.product(*filtered_disambiguate)],
+#     )
+# # Step 3: Find the shortest hypothesis
+# shortest_hyp = min(results)[1]
+
+# logging.debug(f"{shortest_hyp=}")
+# return tuple(shortest_hyp)  # TODO: tuple or set
 
 
 def matches2triplets(matches: List[Dict], graph: Dict[str, Any]) -> List[Triplet]:
@@ -266,6 +344,7 @@ class GraphbrainExtractor(Extractor):
         self.classifier = classifier
         self.text_parser = GraphbrainParserClient(parser_url)
         self.spacy_vocab = self.text_parser.get_vocab()
+        self.patterns = None
 
     @staticmethod
     def from_json(data: Dict[str, Any]):
@@ -293,6 +372,19 @@ class GraphbrainExtractor(Extractor):
             data["classifier"] = self.classifier.to_json()
 
         return data
+
+    def save_patterns(self, fn: str):
+        assert self.patterns is not None, "no rules available"
+        with open(fn, "w") as f:
+            for line in self.patterns:
+                f.write(f"{line}\n")
+
+    def load_patterns(self, fn: str):
+        with open(fn, "r") as f:
+            # self.patterns = f.readlines()
+            self.patterns = f.read().splitlines()
+        # with open(fn, "r") as f:
+        #     self.patterns = json.load(f)
 
     def _parse_text(self, text: str) -> List[GraphParse]:
         """
@@ -408,23 +500,26 @@ class GraphbrainExtractor(Extractor):
         Returns:
             Tuple[List[Dict[str, Any]], List[str]]: The matches and the rules triggered.
         """
-        assert self.classifier is not None, "classifier not initialized"
+        matches = []
+        rules_triggered = []
 
         try:
-            matches = self.classifier.classify(graph)
-            rule_ids_triggered = self.classifier.rules_triggered(graph)
-            logging.debug(f"{self.classifier.rules=}")
-            logging.debug(f"{rule_ids_triggered=}")
-            rules_triggered = [
-                str(self.classifier.rules[rule_id - 1].pattern)
-                for rule_id in rule_ids_triggered
-            ]
+            for pattern in self.patterns:
+                for match in match_pattern(graph, pattern):
+                    if match == {}:
+                        continue
+                    else:
+                        matches.append(match)
+                        rules_triggered.append(pattern)
+                        # TODO: eventually save rule ids triggered
+            logging.debug(f"{self.patterns=}")
+            logging.debug(f"{rules_triggered=}")
         except AttributeError as err:
             logging.error(f"Graphbrain classifier threw exception:\n{err}")
             matches, rules_triggered = [], []
 
-        logging.info(f"classifier matches: {matches}")
-        logging.info(f"classifier rules triggered: {rules_triggered}")
+        # logging.info(f"classifier matches: {matches}")
+        # logging.info(f"classifier rules triggered: {rules_triggered}")
 
         return matches, rules_triggered
 
@@ -512,6 +607,11 @@ class GraphbrainExtractor(Extractor):
         Returns:
             List[Triple]: list of triplets inferred
         """
+
+        # TODO: hardcoded patterns file
+        self.load_patterns("p_lsoie_train.txt")
+        assert self.patterns is not None, "no rules available"
+
         logging.debug(f'inferring triplets for: "{sen}"')
         graph = self.parsed_graphs[sen]
         logging.debug(f'graph: "{graph}"')
@@ -519,6 +619,9 @@ class GraphbrainExtractor(Extractor):
         logging.debug(f'matches: "{matches}"')
         triplets = matches2triplets(matches, graph)
         logging.debug(f'triplets: "{triplets}"')
+
+        # Error in matches2triplets > edge2toksstr(atom) in NON_WORD_ATOMS
+        # AssertionError: no token corresponding to atom=+/B.aa/. in strs_to_atoms
 
         return triplets
 
