@@ -193,8 +193,7 @@ def compress_patterns(mylist):
 def edge_text(atom2word, edge):
     atoms = edge.all_atoms()
     # problem: no matches found
-    # print(f"{atoms=}")
-    # print(f"{atom2word=}")
+    # print(f"{atoms=}, {atom2word=}")
     # type of atoms: class 'graphbrain.hyperedge.Atom'
     # type of atom2word.keys(): class 'graphbrain.hyperedge.UniqueAtom'
     # cannot find data type problem, but with str conversion it works!
@@ -224,106 +223,90 @@ def main_conjunction(edge):
     return hedge([main_conjunction(subedge) for subedge in edge])
 
 
-# function works but doesnt look good
-# TODO: adapt this function to get the same format as the WiRe57 scorer
+# function to save extraction in the same format as WiRe57 data
 def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
-    data = {
-        "arg1": arg1,
-        "rel": rel,
-        # "arg2": arg2,
-        "extractor": "graphbrain",
-        "score": 1.0,
-    }
-    optional = False
+    # print(f"{sent_id=}")
+    data = {"arg1": arg1, "rel": rel, "arg2": arg2, "extractor": "shg", "score": 1.0}
     if len(arg3) > 0:
-        data["arg2"] = arg2
-        data["arg3"] = arg3
-        optional = True
-    elif len(arg2) > 0:
-        data["arg2"] = arg2
-        optional = True
+        data["arg3+"] = arg3
 
-    extraction = "|".join((str(sent_id), edge.to_str(), arg1, rel))
-
-    if extraction not in extractions:
-        extractions[extraction] = {"data": data, "sent_id": sent_id}
-    elif optional:
-        if "arg3" in extractions[extraction]["data"]:
-            extractions[extraction]["data"]["arg3"] += arg3
-            extractions[extraction]["data"]["arg2"] += arg2
-        else:
-            extractions[extraction]["data"]["arg2"] = arg2
+    # check several cases
+    # case 1: new sentence
+    if sent_id not in extractions:
+        if len(arg3) > 0:
+            data["arg3+"] = arg3
+        extractions[sent_id] = [data]
+    # case 2: new triplet arg1, rel, arg2 for existing sentence
+    elif data not in extractions[sent_id]:
+        if len(arg3) > 0:
+            data["arg3+"] = arg3
+        extractions[sent_id].append(data)
+    # case 3: new argument arg3+ for existing triplet arg1, rel, arg2
+    elif len(arg3) > 0:
+        existing_extr = extractions[sent_id]
+        for idx, extr in enumerate(existing_extr):
+            # check if arg1, rel, arg2 are the same
+            if extr == data:
+                if "arg3+" in extr:
+                    # arg3 is datatype list!
+                    for arg3_item in arg3:
+                        if arg3_item not in existing_extr[idx]["arg3+"]:
+                            existing_extr[idx]["arg3+"] += arg3_item
+                else:
+                    existing_extr[idx]["arg3+"] = arg3
 
 
 def find_tuples(extractions, edge, sent_id, atom2word, patterns):
+    print(f"{sent_id=}")
     for pattern in patterns:
         atoms = hedge(pattern).atoms()
-        roots = {atom.root() for atom in atoms}
-        # skip patterns with only two variables (REL, ARG0)
+        roots = {atom.root() for atom in atoms if atom.root() != "*"}
+        # skip patterns with only two variables e.g. (REL/P.{p} ARG0/C)
         if len(roots) < 3:
+            # print("skipped")
             continue
         for match in match_pattern(edge, pattern):
-            if match == {}:
+            # print(f"{match=}")
+            # skip missing/incomplete matches
+            if match == {} or len(match) != len(roots):
+                # print("skipped")
                 continue
-            # print("pattern: ", pattern)
-            # print("match: ", match)
+            # print(f"{pattern=}")
+            # print(f"{match=}")
+
+            # attention: arg1 = ARG0; arg2 = ARG1
+            arg1 = label(match["ARG0"], atom2word)
+            arg2 = label(match["ARG1"], atom2word)
+            # relation cannot be splitted (REL1/REL2)
             rel = label(match["REL"], atom2word)
-            arg0 = label(match["ARG0"], atom2word)
 
             # TODO: structure the code below, e.g. going through every match.keys() and save all existing keys
-            if "ARG1" in match.keys():
-                arg1 = label(match["ARG1"], atom2word)
-            else:
-                arg1 = {}
+            # if "ARG1" in match.keys():
+            #     arg1 = label(match["ARG1"], atom2word)
+            # else:
+            #     arg1 = {}
 
             if "ARG2" in match.keys():
-                arg2 = label(match["ARG2"], atom2word)
+                arg3 = [label(match["ARG2"], atom2word)]
             else:
-                arg2 = {}
+                arg3 = []
 
+            # the following case is rare (not in top20 pattern)
             if "ARG3" in match.keys():
-                arg3 = label(match["ARG3"], atom2word)
-            else:
-                arg3 = {}
+                arg3.append(label(match["ARG3"], atom2word))
 
-            # print(f"{arg0=}, {rel=}, {arg1=}, {arg2=}, {arg3=}")
-            add_to_extractions(extractions, edge, sent_id, arg0, rel, arg1, arg2)
-
-    # for pattern in PATTERNS:
-    #     for match in pattrn.match_pattern(edge, pattern):
-    #         print("pattern: ", pattern)
-    #         print("match: ", match)
-    #         arg1 = match["ARG1"]
-    #         arg2 = match["ARG2"]
-    #         if "ARG3..." in match:
-    #             arg3 = [label(match["ARG3..."], atom2word)]
-    #         else:
-    #             arg3 = []
-
-    #         if "REL1" in match:
-    #             rel_parts = []
-    #             i = 1
-    #             while "REL{}".format(i) in match:
-    #                 rel_parts.append(label(match["REL{}".format(i)], atom2word))
-    #                 i += 1
-    #             rel = " ".join(rel_parts)
-    #         else:
-    #             rel = label(match["REL"], atom2word)
-
-    #         arg1 = label(arg1, atom2word)
-    #         arg2 = label(arg2, atom2word)
-
-    #         add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3)
+            print(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
+            add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3)
 
 
 def information_extraction(extractions, main_edge, sent_id, atom2word, patterns):
-    # print(f"{main_edge=}")
+    # print(f"{sent_id=}, {main_edge=}")
     if main_edge.is_atom():
         return
     if main_edge.type()[0] == "R":
         edges = conjunctions_decomposition(main_edge, concepts=True)
         for edge in edges:
-            main_conjunction_edge = main_conjunction(edge)
+            # main_conjunction_edge = main_conjunction(edge)
             # print(f"find_tuples() for {main_conjunction_edge=}")
             find_tuples(
                 extractions, main_conjunction(edge), sent_id, atom2word, patterns
