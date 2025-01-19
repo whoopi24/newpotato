@@ -10,17 +10,17 @@ from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional  # , Tuple
 
 from graphbrain.learner.classifier import apply_curly_brackets
-from graphbrain.parsers import create_parser
 from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
+from tqdm import tqdm
 from tuw_nlp.text.utils import gen_tsv_sens, tuple_if_list
 
 from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
 from newpotato.extractors.graphbrain_extractor_PC import GraphbrainMappedTriplet
 
-# from newpotato.modifications.classifier import Classifier
+# TODO: do not use import * -> check which functions are needed
 from newpotato.modifications.oie_patterns import *
-from newpotato.modifications.pattern_ops import *
+from newpotato.modifications.pattern_ops import *  # all_variables
 from newpotato.modifications.patterns import PatternCounter
 
 
@@ -259,37 +259,57 @@ class HITLManager:
         max_items,
         input="lsoie_wiki_dev.conll",
     ):
-        stream = open(input, "r", encoding="utf-8")
-        iter = 0
-        parser = create_parser(lang="en", corefs=False)
-        last_sent = ""
-        for sen_idx, sen in enumerate(gen_tsv_sens(stream)):
-            if iter == max_items:
-                break
-            print(f"processing sentence {sen_idx}")
-            # get sentence
-            sent = []
-            for _, tok in enumerate(sen):
-                sent.append(tok[1])
 
-            # parse sentence
-            sent = " ".join(sent)
-            if sent == last_sent:
-                continue
-            last_sent = sent
-            print(sent)
-            parse_result = parser.parse(sent)
-            for parse in parse_result["parses"]:
-                main_edge = parse["main_edge"]
-                atom2word = parse["atom2word"]
-                if main_edge:
-                    # print(f"{sent=}, {main_edge=}, {atom2word=}")
+        # use load_and_map_lsoie(input_file, extractor) without mapping?
+        # replaced new parser with existing one from HITLManager
+
+        with open(input) as stream:
+            total, skipped = 0, 0
+            last_sent = ""
+            for sen_idx, sen in tqdm(enumerate(gen_tsv_sens(stream))):
+                if total == max_items:
+                    break
+                total += 1
+                words = [t[1] for t in sen]
+                sentence = " ".join(words)
+
+                # avoid double parsing - ONLY when Triplet creation not needed!
+                # remark: sen_idx skipped -> from 0 to xy with gaps
+                if sentence == last_sent:
+                    continue
+                else:
+                    last_sent = sentence
+
+                # text parsing and information extraction (prediction)
+                text_to_graph = self.extractor.get_graphs(sentence)
+                # TODO: how to handle skipped cases
+                if len(text_to_graph) > 1:
+                    logging.error(f"sentence split into two: {words}")
+                    logging.error(f"{text_to_graph=}")
+                    logging.error("skipping")
+                    skipped += 1
+                    # print(f"{sen_idx=}")
+                    # extractions[sen_idx] = []
+                    logging.error(f"{skipped=}, {total=}")
+                    continue
+
+                try:
+                    graph = text_to_graph[sentence]["main_edge"]
+                except:
+                    logging.error(f"{text_to_graph=}")
+                    logging.error("skipping")
+                    skipped += 1
+                    # print(f"{sen_idx=}")
+                    # extractions[sen_idx] = []
+                    continue
+                logging.debug(f"{sentence=}, {graph=}")
+
+                if graph:  # maybe not necessary
+                    atom2word = text_to_graph[sentence]["atom2word"]
+                    # print(f"{sentence=}, {graph=}, {atom2word=}")
                     information_extraction(  # in oie_patterns.py
-                        extractions, main_edge, sen_idx, atom2word, patterns
+                        extractions, graph, sen_idx, atom2word, patterns
                     )
-
-            # next round
-            iter += 1
 
         # return(extractions)
 
@@ -332,8 +352,7 @@ class HITLManager:
 
         elif method == "supervised":
 
-            # 3rd version: uses functional patterns from parsed sentences with mapped triplets
-            # takes longer than 2nd version because all cases have to be added to classifier
+            # uses functional patterns from parsed sentences with mapped triplets
             # UPDATE: removed adding the cases to the classifier and double parsing
 
             patterns = Counter()
@@ -370,6 +389,7 @@ class HITLManager:
                         if not skip:
                             # if not positive:
                             #     print(f"{hyperedge=}")
+                            # TODO: patterns without REL are counted - why?
                             print("count: ", pattern)
                             patterns[hedge(apply_curly_brackets(pattern))] += 1
                     else:
