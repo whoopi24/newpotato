@@ -2,12 +2,12 @@ import argparse
 import json
 import logging
 
-# from rich import print
 from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
 
 from newpotato.evaluate.eval_hitl import HITLEvaluator
+from newpotato.evaluate.wire_functions import *
 from newpotato.hitl_marina import HITLManager
 from newpotato.modifications.oie_patterns import *
 from newpotato.utils import get_triplets_from_user, print_tokens
@@ -31,10 +31,9 @@ class NPTerminalClient:
                 )
                 return
 
-    # TODO: cannot find self.hitl.extractor.save_patterns(fn)
     def write_patterns_to_file(self):
         while True:
-            console.print("[bold cyan]Enter path to patterns file:[/bold cyan]")
+            console.print("[bold cyan]Enter path to patterns .txt file:[/bold cyan]")
             fn = input("> ")
             try:
                 self.hitl.extractor.save_patterns(fn)
@@ -78,8 +77,9 @@ class NPTerminalClient:
                 positive = True if choice_str == "c" else False
                 self.hitl.store_triplet(sen, triplet, positive=positive)
 
+    # TODO: adapt this function (add input file instead of enter sentence)
     def classify(self):
-        if not self.hitl.get_rules():
+        if not self.hitl.extractor.patterns:
             console.print("[bold red]No rules extracted yet[/bold red]")
             return
         else:
@@ -118,9 +118,13 @@ class NPTerminalClient:
         triplets = self.hitl.get_true_triplets()
         self.print_triplets(triplets, max_n=10)
 
-    def print_rules(self):
-        self.hitl.get_rules()
-        self.hitl.print_rules(console)
+    def print_rules(self, top_n=20):
+        if self.hitl.extractor.patterns is None:
+            rules = self.hitl.get_rules(top_n)
+        else:
+            rules = self.hitl.extractor.patterns
+        console.print("[bold green]Extracted Rules:[/bold green]")
+        console.print(rules)
 
     def print_triplets(self, triplets_by_sen, max_n=None):
         console.print("[bold green]Current Triplets:[/bold green]")
@@ -138,25 +142,100 @@ class NPTerminalClient:
 
         console.print(table)
 
-    def evaluate(self, fn=None):
+    # function to evaluate patterns on unseen data
+    def evaluate(self, data=None):
+        if self.hitl.extractor.patterns is None:
+            console.print("[bold cyan]Enter path to patterns file:[/bold cyan]")
+            fn = input("> ")
+            try:
+                self.hitl.extractor.load_patterns(fn)
+            except FileNotFoundError:
+                console.print(f"[bold red]No such file or directory: {fn}[/bold red]")
+                console.print(
+                    "[bold red]Run (R)ules to generate patterns from the current HITL state![/bold red]"
+                )
+
+        # gold data creation and prediction for LSOIE data
+        if data:
+            # data = "lsoie_wiki_dev.conll"
+            self.hitl.extractor.temporary_triplets_creation(
+                input=data, max_items=1000000
+            )
+        else:
+            console.print("[bold cyan]Enter path to test data:[/bold cyan]")
+            data = input("> ")
+
+            try:
+                self.hitl.extractor.temporary_triplets_creation(
+                    input=data, max_items=1000000
+                )
+            except FileNotFoundError:
+                console.print(f"[bold red]No such file or directory: {data}[/bold red]")
+            else:
+                return
+
+        # evaluate triplets with WiRe57 scorer
+        gold_data = data.split(".")[0] + "_gold.json"
+        pred_data = data.split(".")[0] + "_pred.json"
+        reference = json.load(open(gold_data))
+        # gold_data = dict of documents, each doc a list of sents with a "tuples" attribute,
+        # which is the list of reference tuples
+        gold = {s["id"]: s["tuples"] for doc in reference.values() for s in doc}
+        # TODO: remove ids from gold without prediction ?
+        all_predictions = json.load(open(pred_data))
+        predictions_by_OIE = split_tuples_by_extractor(gold.keys(), all_predictions)
+        systems = predictions_by_OIE.keys()
+        reports = {}
+
+        for e in systems:
+            report = ""
+            logging.info(f"Evaluating {e} system ...")
+            metrics, raw_match_scores = eval_system(gold, predictions_by_OIE[e])
+            with open("raw_scores/" + e + "_prec_scores.dat", "w") as f:
+                f.write(str(raw_match_scores[0]))
+            with open("raw_scores/" + e + "_rec_scores.dat", "w") as f:
+                f.write(str(raw_match_scores[1]))
+            prec, rec = metrics["precision"], metrics["recall"]
+            f1_score = f1(prec, rec)
+            exactmatch_prec = (
+                metrics["exactmatches_precision"][0]
+                / metrics["exactmatches_precision"][1]
+            )
+            exactmatch_rec = (
+                metrics["exactmatches_recall"][0] / metrics["exactmatches_recall"][1]
+            )
+            # weighted prec score, e.g. prec = 1, nr. of prediction tuples = 8 -> 12.5%
+            # weighted rec score, e.g. rec = 0.6, nr. of reference tuples = 4 -> 15%
+            report += "System {} prec/rec/f1: {:.1%} {:.1%} {:.3f}".format(
+                e, prec, rec, f1_score
+            )
+            report += "\nSystem {} prec/rec of matches only (nr. of matches): {:.0%} {:.0%} ({})".format(
+                e,
+                metrics["precision_of_matches"],
+                metrics["recall_of_matches"],
+                # metrics["non-matches"],
+                metrics[
+                    "matches"
+                ],  # this seems to be incorrect -> 'non-matches' required?
+            )
+            report += "\n{} were exactly correct, out of {} predicted / the reference {}.".format(
+                metrics["exactmatches_precision"][0],
+                metrics["exactmatches_precision"][1],
+                metrics["exactmatches_recall"][1],
+            )
+            report += "\nExact-match prec/rec/f1: {:.1%} {:.1%} {:.3f}".format(
+                exactmatch_prec, exactmatch_rec, f1(exactmatch_prec, exactmatch_rec)
+            )
+            reports[f1_score] = report
+        sorted_reports = [a[1] for a in sorted(reports.items(), reverse=True)]
+        print("\n" + "\n\n".join(sorted_reports))
+
         # evaluator = HITLEvaluator(self.hitl)
         # results = evaluator.get_results()
         # for key, value in results.items():
         #     console.print(f"{key}: {value}")
         # if fn:
         #     evaluator.write_events_to_file(fn)
-
-        # evaluate patterns on unseen data
-        # TODO: hardcoded patterns file
-        self.hitl.extractor.load_patterns("p_lsoie_train.txt")
-        if fn:
-            self.evaluate_oie_patterns(
-                self.hitl.extractor.patterns, input="lsoie_wiki_dev.conll", output=fn
-            )
-        else:
-            self.evaluate_oie_patterns(
-                self.hitl.extractor.patterns, input="lsoie_wiki_dev.conll"
-            )
 
     def print_graphs(self):
         table = Table(show_header=True, header_style="bold magenta")
@@ -220,108 +299,6 @@ class NPTerminalClient:
                 else:
                     get_triplets_from_user(sen, self.hitl, console)
 
-    def save_oie_file(self, obj):
-        while True:
-            console.print("[bold cyan]Enter path to OIE output file:[/bold cyan]")
-            fn = input("> ")
-            try:
-                with open(fn, "w") as f:
-                    for line in obj:
-                        f.write(f"{line}\n")
-
-                # with open(fn, "w") as f:
-                #     # indent=2 makes the file human-readable if the data is nested (optional)
-                #     json.dump(obj, f, indent=2)
-            except FileNotFoundError:
-                console.print(f"[bold red] No such file or directory: {fn}[/bold red]")
-            else:
-                console.print(
-                    f"[bold cyan]Successfully saved OIE output file to {fn}[/bold cyan]"
-                )
-                return
-
-    def evaluate_oie_patterns(
-        self, patterns, input="lsoie_wiki_dev.conll", output="lsoie_wiki_dev_pred.json"
-    ):
-
-        # Graphbrain paper (table 6 on page 17)
-        # PATTERNS = [
-        #     "(REL/P.{scx} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{sox} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{srx} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{sax} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{pcx} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{pox} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{prx} ARG1/C ARG2 ARG3...)",
-        #     "(REL/P.{pax} ARG1/C ARG2 ARG3...)",
-        #     "(+/B.{ma} (ARG1/C...) (ARG2/C...))",
-        #     "(+/B.{mm} (ARG1/C...) (ARG2/C...))",
-        #     "(REL1/P.{sx}-oc ARG1/C (REL2/T ARG2))",
-        #     "(REL1/P.{px} ARG1/C (REL2/T ARG2))",
-        #     "(REL1/P.{sc} ARG1/C (REL3/B REL2/C ARG2/C))",
-        # ]
-
-        # Top10 LSOIE train - add {} around argroles to find more matches - OLD
-        # PATTERNS = [
-        #     "(REL/P.{px} ARG0 ARG1)",
-        #     "((*/M REL/P.{px}) ARG0 ARG1)",
-        #     "(REL/P.{sx} ARG0 ARG1)",
-        #     "(REL/P.{sr} ARG0 ARG1)",
-        #     "((*/M REL/P.{so}) ARG0 ARG1)",
-        #     "(REL/P.{sox} ARG0 ARG1 ARG2...)",
-        # ]
-
-        # patterns with variables from learner/classifier - NOT USEABLE
-        # PATTERNS = [
-        #     "(*/P.{ox} (*/B.{mm} (var * ARG0) (var * REL)) (* (*/B.{mm} * (var * ARG1))))",
-        #     "((var */P.{sxx} REL) (var * ARG0) (var * ARG2) (var * ARG1))",
-        #     "(*/P.{rx} (*/P.{c} (*/B.{ma} ((var * REL) *) *)) (* (*/P.{r} (* ((var * REL) ((var * ARG0) *))))))",
-        #     "((* (var */P.{s} REL)) (var * ARG0))",
-        #     "((* (* (var */P.{r} REL))) (*/P.{o} (var * ARG0)))",
-        #     "(* (any ((var */P.{sc} REL) (var * ARG0) (var * ARG1)) (*/P.{o} (*/B.{ma} * ((var * REL) (var * ARG0))))) *)",
-        #     "(* (any ((var */P.{sc} REL) (var * ARG0) (var * ARG1)) *) (any (*/P.{or} (var * ARG0) ((var */P.{x} REL) *)) *))",
-        # ]
-
-        # test
-        # PATTERNS = [
-        #     "(*/P.{px} ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
-        #     "((*/M */P.{px}) ARG0/C (REL/P.{ox} ARG2/C ARG1/S))",
-        # ]
-
-        # Directories & files
-        DIR = "WiRe57/data"
-        EXTR_MANUAL = "WiRe57_343-manual-oie.json"
-        EXTR_BEFORE = (
-            "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
-            "reverb_props-export.json"
-        )
-        EXTR_AFTER = "test-export.json"
-
-        # manual = json.load(open("{}/{}".format(DIR, EXTR_MANUAL)))
-        # extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
-        extractions = {}
-
-        # TODO: change format of manual (LSOIE format needed)
-        self.hitl.parse_sent_with_ann_eval(
-            patterns,
-            extractions,
-            max_items=100000,
-            input=input,
-        )
-
-        # add SH extractions to extr file (extractions from other OIE systems)
-        # for _, extraction in extractions.items():
-        #     print(f"{extraction=}")
-        #     extr[extraction["sent_id"]].append(extraction["data"])
-
-        # saving extractions
-        # output = "{}/{}".format(DIR, EXTR_AFTER)
-        with open(output, "w", encoding="utf-8") as f:
-            json.dump(extractions, f, ensure_ascii=False, indent=4)
-
-        # number of predicted sentences
-        pred_sent_cnt = len(extractions)
-
     def run_oie(self):
         # get status data
         status = self.hitl.get_status()
@@ -338,34 +315,21 @@ class NPTerminalClient:
         # print(simple_patterns)
         # print("Total count: ", total_cnt)
 
-        # # save patterns in a text file
-        # self.save_oie_file(top_patterns)
-        # self.save_oie_file(simple_patterns)
-
         # open saved oie patterns file
         # f = open("p_train.txt", "r")
         # patterns = f.read()
 
-        # supervised rule learning
-        top_n = 20
-        pc = self.hitl.generalise_graph(top_n, method="supervised", check_vars=True)
-        # print(pc.most_common(top_n))
-        patterns = [key for key, _ in pc.most_common(top_n)]
-        print(patterns)
+        # # supervised rule learning
+        # top_n = 20
+        # pc = self.hitl.generalise_graph(method="supervised", check_vars=True)
+        # patterns = [key for key, _ in pc.most_common(top_n)]
+        # print(patterns)
 
-        # save patterns in a text file
-        self.save_oie_file(patterns)
-
-        # needed for HITLEvaluator
-        # self.hitl.extractor.patterns = patterns
-
-        pattern_cnt = sum(pc.values())
-        print(f"{pattern_cnt=}")
-        print(
-            f"{pattern_cnt/total_cnt:.2%} of annotated sentences have a pattern"
-        )  # not exactly because of multiple patterns per sentence
-
-        return print("Work in progress.")
+        # pattern_cnt = sum(pc.values())
+        # print(f"{pattern_cnt=}")
+        # print(
+        #     f"{pattern_cnt/total_cnt:.2%} of annotated sentences have a pattern"
+        # )  # not exactly because of multiple patterns per sentence
 
     def _run(self):
         while True:
@@ -403,6 +367,7 @@ class NPTerminalClient:
             elif choice == "Q":
                 console.print("[bold red]Exiting...[/bold red]")
                 break
+            # TODO: remove this and update help info
             elif choice == "O":
                 self.run_oie()
             elif choice == "H":
@@ -462,7 +427,10 @@ class NPTerminalClient:
 
         if args.get_rules:
             console.print("[bold cyan]getting rules[/bold cyan]")
-            self.hitl.get_rules()
+            if args.rules_cnt:
+                self.print_rules(args.rules_cnt)
+            else:
+                self.print_rules()
 
         if args.evaluate:
             self.evaluate(args.evaluate)
@@ -470,7 +438,7 @@ class NPTerminalClient:
         if args.save_patterns:
             self.hitl.extractor.save_patterns(args.save_patterns)
             console.print(
-                f"[bold cyan]Saved patterns to {args.save_patterns}[/bold cyan]"
+                f"[bold cyan]Successfully saved extractor patterns to {args.save_patterns}[/bold cyan]"
             )
 
         if args.save_state:
@@ -490,6 +458,7 @@ def get_args():
     parser.add_argument("-o", "--oracle", action="store_true")
     parser.add_argument("-i", "--interactive", action="store_true")
     parser.add_argument("-r", "--get_rules", action="store_true")
+    parser.add_argument("-rc", "--rules_cnt", default=20, type=int)
     parser.add_argument("-e", "--evaluate", default=None, type=str)
     parser.add_argument("-l", "--load_state", default=None, type=str)
     parser.add_argument("-lp", "--load_patterns", default=None, type=str)

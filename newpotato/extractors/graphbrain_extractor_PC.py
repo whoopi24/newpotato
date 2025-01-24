@@ -1,18 +1,27 @@
 import itertools
+import json
 import logging
-from collections import defaultdict
+import re
+from collections import Counter, defaultdict
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
 from graphbrain.hyperedge import Hyperedge, hedge
-from graphbrain.learner.classifier import Classifier
+from graphbrain.learner.classifier import Classifier, apply_curly_brackets
 from graphbrain.learner.classifier import from_json as classifier_from_json
-from graphbrain.learner.rule import Rule
+from tqdm import tqdm
+from tuw_nlp.text.utils import gen_tsv_sens
 
 from newpotato.constants import NON_ATOM_WORDS, NON_WORD_ATOMS
 from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
 from newpotato.extractors.graphbrain_parser import GraphbrainParserClient, GraphParse
-from newpotato.modifications.pattern_ops import apply_variable, apply_variables
+from newpotato.modifications.oie_patterns import information_extraction
+from newpotato.modifications.pattern_ops import (
+    all_variables,
+    apply_variable,
+    apply_variables,
+    contains_variable,
+)
 from newpotato.modifications.patterns import _matches_atomic_pattern, match_pattern
 
 # def evaluate_combination(args):
@@ -401,59 +410,72 @@ class GraphbrainExtractor(Extractor):
             yield graph["text"], graph  # Generator[Tuple[str, GraphParse]]
 
     def is_trained(self):
-        return self.classifier is not None
-
-    def get_annotated_graphs_from_classifier(self) -> List[str]:
-        """
-        Get the annotated graphs
-
-        Returns:
-            List[str]: The annotated graphs. An annotated graph is a hyperedge that has been annotated with variables. e.g. "REL(ARG1, ARG2)"
-        """
-        assert self.classifier is not None, "classifier not initialized"
-        return [str(rule[0]) for rule in self.classifier.cases]
+        return self.patterns is not None
 
     def get_n_rules(self):
-        if self.classifier is None:
+        if self.patterns is None:
             return 0
-        return len(self.classifier.rules)
+        return len(self.patterns)
 
-    # TODO: modify get_rules (use Pattern counter instead of extract_rules())
-    def get_rules(self, text_to_triplets=None, learn: bool = True) -> List[Rule]:
+    def get_rules(self, text_to_triplets=None, top_n=20) -> List[str]:
         """
-        Get the rules.
-
-        Args:
-            learn (bool): whether to run graphbrain classifier's learn function.
-                If False (default), only extract_patterns is called
+        Get the top N rules.
         """
-        if text_to_triplets is not None:
-            self.add_cases(text_to_triplets)
-            self.extract_rules(learn=learn)
+        pc = self.extract_rules(text_to_triplets)
+        self.patterns = [key for key, _ in pc.most_common(top_n)]
+        return [key for key, _ in pc.most_common(top_n)]
 
-        if self.classifier is None:
-            return []
-        return [rule.pattern for rule in self.classifier.rules]
-
-    def extract_rules(self, learn: bool = False):
+    def extract_rules(self, text_to_triplets=None, check_vars=True) -> Counter:
         """
         Extract the rules from the annotated graphs.
         """
-        assert self.classifier is not None, "classifier not initialized"
-        if learn:
-            self.classifier.learn()
-        else:
-            self.classifier.extract_patterns()
-            self.classifier._index_rules()
+        assert text_to_triplets is not None, "annotated sentences missing"
+        annotated_graphs = self.add_cases(text_to_triplets)
+        patterns = Counter()
 
-    def print_rules(self, console):
-        annotated_graphs = self.get_annotated_graphs_from_classifier()
-        console.print("[bold green]Annotated Graphs:[/bold green]")
-        console.print(annotated_graphs)
+        # TODO: conjunction decomposition, include special builder
+        # TODO: for hyperedge, positive in self.get_annotated_graphs(): -> what is more correct?
+        for hyperedge in annotated_graphs:
+            hyperedge = hedge(hyperedge)
+            # print(f"{hyperedge=}")
+            vars = all_variables(hyperedge)
+            # print(f"{vars.keys()=}")
+            if hyperedge.not_atom:
+                # edges = conjunctions_decomposition(hyperedge, concepts=True)
+                # print(f"{edges=}")
+                # for edge in edges:
+                # vars2 = all_variables(edge)
+                # if len(vars) == len(vars2):
+                pattern = generalise_edge(hyperedge)
+                # print(f"{pattern=}")
+                if pattern is None:
+                    # print("skipped - no pattern")
+                    continue
+                # TODO: eliminate this elif - should always be true
+                elif check_vars:
+                    skip = False
+                    atoms = pattern.atoms()
+                    roots = {atom.root() for atom in atoms}
+                    for var in vars:
+                        # make sure to include all variables in the final pattern
+                        if str(var) in roots:
+                            continue
+                        else:
+                            # print("skipped - var missing")
+                            skip = True
+                            break
+                    if not skip:
+                        # if not positive:
+                        #     print(f"{hyperedge=}")
+                        # TODO: patterns without REL are counted - why?
+                        print("count: ", pattern)
+                        patterns[hedge(apply_curly_brackets(pattern))] += 1
+                else:
+                    # TODO: do i want this else clause?
+                    print("count: ", pattern)
+                    patterns[hedge(apply_curly_brackets(pattern))] += 1
 
-        rules = self.get_rules()
-        console.print("[bold green]Extracted Rules:[/bold green]")
-        console.print(rules)
+        return patterns
 
     def add_cases(
         self,
@@ -515,7 +537,7 @@ class GraphbrainExtractor(Extractor):
             logging.debug(f"{self.patterns=}")
             logging.debug(f"{rules_triggered=}")
         except AttributeError as err:
-            logging.error(f"Graphbrain classifier threw exception:\n{err}")
+            logging.error(f"Graphbrain matcher threw exception:\n{err}")
             matches, rules_triggered = [], []
 
         # logging.info(f"classifier matches: {matches}")
@@ -607,9 +629,6 @@ class GraphbrainExtractor(Extractor):
         Returns:
             List[Triple]: list of triplets inferred
         """
-
-        # TODO: hardcoded patterns file
-        self.load_patterns("p_lsoie_train.txt")
         assert self.patterns is not None, "no rules available"
 
         logging.debug(f'inferring triplets for: "{sen}"')
@@ -691,3 +710,273 @@ class GraphbrainExtractor(Extractor):
             return GraphbrainMappedTriplet(
                 mapped_pred, tuple(mapped_args), toks, variables, sen_graph
             )
+
+    def temporary_triplets_creation(self, input, max_items=999999999):
+        # create dictionary with correctly ordered and named keys
+        name_mapping = {
+            "A0": "arg1",
+            "P": "rel",
+            "A1": "arg2",
+            "A2": "arg3",
+            "A3": "arg4",
+            "A4": "arg5",
+            "A5": "arg6",
+        }
+
+        with open(input) as stream:
+            total, skipped = 0, 0
+            last_sent = ""
+            sent_cnt = 0
+            gold_list = list()
+            extractions = {}
+            for sen_idx, sen in tqdm(enumerate(gen_tsv_sens(stream))):
+                # early break condition
+                if total == max_items:
+                    break
+                total += 1
+                words = [t[1] for t in sen]
+                sentence = " ".join(words)
+
+                # prediction: infer triplets for new sentences
+                if sentence == last_sent:
+                    # avoid double parsing/new entry in extractions for same sentence
+                    # but save id for gold data creation -> add triplet to previous sentence ID
+                    # remark: sen_idx skipped -> from 0 to xy with gaps
+                    sen_idx = last_id
+                else:
+                    last_sent = sentence
+                    last_id = sen_idx
+                    sent_cnt += 1
+                    skip = False
+                    # text parsing (only if needed)
+                    text_to_graph = self.get_graphs(sentence)
+                    # TODO: how to handle skipped cases
+                    # quick solution for now: skip gold data creation as well
+                    if len(text_to_graph) > 1:
+                        logging.error(f"sentence split into two: {words}")
+                        logging.error(f"{text_to_graph=}")
+                        logging.error("skipping")
+                        skipped += 1
+                        skip = True
+                        logging.error(f"{skipped=}, {total=}")
+
+                    # TODO: investigate why this try/except is needed
+                    try:
+                        graph = text_to_graph[sentence]["main_edge"]
+                    except:
+                        logging.error(f"{text_to_graph=}")
+                        logging.error("skipping")
+                        skipped += 1
+                        skip = True
+                        logging.error(f"{skipped=}, {total=}")
+                    logging.debug(f"{sentence=}, {graph=}")
+
+                    # TODO: check if necessary
+                    # generating triplets after conjunction decomposition (inside information_extraction())
+                    if graph and not skip:
+                        atom2word = text_to_graph[sentence]["atom2word"]
+                        # print(f"{sentence=}, {graph=}, {atom2word=}")
+                        information_extraction(  # in oie_patterns.py
+                            extractions, graph, sen_idx, atom2word, self.patterns
+                        )
+
+                    # add gold_dict to gold_list for last sentence (but skip the very first)
+                    if total > 1:
+                        # combine arg3-arg6 to "arg3+"
+                        keys_to_combine = ["arg3", "arg4", "arg5", "arg6"]
+                        tuples_list = []
+                        for tup in gold_dict["tuples"]:
+                            arg3to6 = []
+                            for key in keys_to_combine:
+                                if key in tup:
+                                    arg3to6.append(tup[key])
+                                    # remove original key
+                                    del tup[key]
+                            # add arg2 if missing
+                            if "arg2" not in tup:
+                                tup["arg2"] = {"words": [], "words_indexes": []}
+                            # add combined keys or empty list
+                            tup["arg3+"] = arg3to6
+                            tuples_list.append(tup)
+
+                        # Add to the list under a new key
+                        gold_dict["tuples"] = tuples_list
+                        gold_list.append(gold_dict)
+
+                    # create new gold_dict for new sentence
+                    gold_dict = {
+                        "id": str(sen_idx),
+                        "sent": sentence,
+                        "tokens": words,
+                        "tuples": list(),
+                    }
+
+                # gold data creation: add multiple triplets to gold_dict for one sentence
+                temp = {k: defaultdict(list) for k in name_mapping.keys()}
+                for i, tok in enumerate(sen):
+                    # 'text': '(The second)/(The second danger to a year of relatively healthy global economic growth)',
+                    # 'words': ['The', 'second'],
+                    # 'words_indexes': [0, 1],
+                    label = tok[7].split("-")[0]
+                    if label == "O":
+                        continue
+                    temp[label]["words"].append(tok[1])
+                    temp[label]["words_indexes"].append(i)
+
+                # TODO: add "text" entry with joining "words" list to string
+                # for key in temp.keys():
+                #     joined_text = " ".join(temp[key]["words"])
+                #     temp[key]["text"] = joined_text
+
+                args_dict = {
+                    name_mapping.get(key, key): value
+                    for key, value in temp.items()
+                    if value
+                }
+                logging.debug(f"{sentence=}, {args_dict=}")
+
+                gold_dict["tuples"].append(args_dict)
+
+            logging.info(
+                f"{skipped/sent_cnt:.2%} of annotated sentences skipped (parsing problems)"
+            )
+            # save gold dictionary to json file
+            save_dict = {input: gold_list}
+            output = input.split(".")[0] + "_gold.json"
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(save_dict, f, ensure_ascii=False, indent=4)
+
+            # save predictions to json file
+            output = input.split(".")[0] + "_pred.json"
+            with open(output, "w", encoding="utf-8") as f:
+                json.dump(extractions, f, ensure_ascii=False, indent=4)
+
+
+def extract_top_level_elements(hyperedge):
+    elements = []
+    stack = []
+    start_idx = 0
+
+    str_edge = str(hyperedge)
+
+    # remove outermost parentheses
+    if str_edge.startswith("(") and str_edge.endswith(")"):
+        str_edge = str_edge[1:-1]
+
+    for idx, char in enumerate(str_edge):
+        if char == "(":
+            if not stack:
+                start_idx = idx  # start of a top-level element
+            stack.append(char)
+        elif char == ")":
+            stack.pop()
+            if not stack:  # end of a top-level element
+                element = str_edge[start_idx : idx + 1]
+                elements.append(element)
+
+    return elements
+
+
+def extract_second_level(hyperedge):
+    top_level_elements = extract_top_level_elements(hyperedge)
+    second_level = []
+    # only consider relations of sizes 3 or 4
+    if len(top_level_elements) > 4:
+        # print("too many relations")
+        return second_level
+    # TODO: what about smaller relations
+    # if len(top_level_elements) < 3:
+    #     print("not enough relations")
+    #     print(top_level_elements)
+    #     return second_level
+
+    for element in top_level_elements:
+        # keep "var" objects intact
+        if element.startswith("(var"):
+            second_level.append(element)
+        else:
+            # check for nested components
+            nested_elements = extract_top_level_elements(element)
+            # only unnest multiple components
+            if len(nested_elements) > 1:
+                second_level.append(nested_elements)
+            else:
+                second_level.append(element)
+
+    return second_level
+
+
+def edge2pattern(edge, root=False, subtype=False):
+    # print("edge2pattern-e: ", edge)
+    if root and edge.atom:
+        root_str = edge.root()
+    elif contains_variable(edge):
+        # print("contains var")
+        # count the number of unique variables
+        var_cnt = len(re.findall(r"\bvar\b", str(edge)))
+        if var_cnt > 1:
+            # print("multiple vars")
+            # print("edge2pattern-e: ", edge)
+            # at least two variables in second level hyperedge - does not meet conditions
+            return None
+        elif edge.contains("REL", deep=True):
+            root_str = "REL"
+        elif edge.contains("ARG0", deep=True):
+            root_str = "ARG0"
+        elif edge.contains("ARG1", deep=True):
+            root_str = "ARG1"
+        elif edge.contains("ARG2", deep=True):
+            root_str = "ARG2"
+        elif edge.contains("ARG3", deep=True):
+            root_str = "ARG3"
+        elif edge.contains("ARG4", deep=True):
+            root_str = "ARG4"
+        elif edge.contains("ARG5", deep=True):
+            root_str = "ARG5"
+        else:
+            # print("other problem")
+            root_str = "*"
+    else:
+        root_str = "*"
+    if subtype:
+        et = edge.type()
+    else:
+        et = edge.mtype()
+    pattern = "{}/{}".format(root_str, et)
+    ar = edge.argroles()
+    if ar == "":
+        # print("edge2pattern-p: ", hedge(pattern))
+        return hedge(pattern)
+    else:
+        # print("edge2pattern-p: ", hedge("{}.{}".format(pattern, ar)))
+        return hedge("{}.{}".format(pattern, ar))
+
+
+# function to generalise each hyperedge with functional patterns
+# generalisation approach: using var as root and adding main type (mtype) of edge after /
+# only consider recursive expansion to depth 2 for simplicity
+def generalise_edge(hyperedge):
+    second_level_result = extract_second_level(hyperedge)
+    # print(f"{second_level_result=}")
+    if len(second_level_result) == 0:
+        return None
+    final_result = []
+    for item in second_level_result:
+        if type(item) == list:
+            for i in item:
+                # print(f"{i=}")
+                newitem = edge2pattern(hedge(i))
+                # print(f"{newitem=}")
+                if newitem is not None:
+                    final_result.append(str(newitem))
+        else:
+            # print(f"{item=}")
+            newitem = edge2pattern(hedge(item))
+            # print(f"{newitem=}")
+            if newitem is not None:
+                final_result.append(str(newitem))
+
+    if None not in final_result:
+        return hedge(" ".join(final_result))
+    else:
+        return None

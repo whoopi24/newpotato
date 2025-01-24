@@ -1,87 +1,16 @@
-import argparse
-import json
 import logging
 
-
-def get_args():
-    parser = argparse.ArgumentParser(description="")
-    parser.add_argument("-d", "--debug", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument("-g", "--gold", required=True, default=None, type=str)
-    parser.add_argument("-p", "--pred", required=True, default=None, type=str)
-    return parser.parse_args()
-
-
-def main():
-    args = get_args()
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-        force=True,
-    )
-    if args.verbose:
-        logging.getLogger().setLevel(logging.INFO)
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-
-    # dict of documents, each doc a list of sents with a "tuples" attribute, which is the list of reference tuples
-    reference = json.load(open(args.gold))
-    gold = {s["id"]: s["tuples"] for doc in reference.values() for s in doc}
-    # TODO: remove ids from gold without prediction ?
-    all_predictions = json.load(open(args.pred))
-    predictions_by_OIE = split_tuples_by_extractor(gold.keys(), all_predictions)
-    systems = predictions_by_OIE.keys()
-
-    reports = {}
-    # TODO: remove for loop -> only one system for LSOIE data
-    for e in systems:
-        report = ""
-        logging.info(f"Evaluating {e} system ...")
-        metrics, raw_match_scores = eval_system(gold, predictions_by_OIE[e])
-        with open("raw_scores/" + e + "_prec_scores.dat", "w") as f:
-            f.write(str(raw_match_scores[0]))
-        with open("raw_scores/" + e + "_rec_scores.dat", "w") as f:
-            f.write(str(raw_match_scores[1]))
-        prec, rec = metrics["precision"], metrics["recall"]
-        f1_score = f1(prec, rec)
-        exactmatch_prec = (
-            metrics["exactmatches_precision"][0] / metrics["exactmatches_precision"][1]
-        )
-        exactmatch_rec = (
-            metrics["exactmatches_recall"][0] / metrics["exactmatches_recall"][1]
-        )
-        # weighted prec score, e.g. prec = 1, nr. of prediction tuples = 8 -> 12.5%
-        # weighted rec score, e.g. rec = 0.6, nr. of reference tuples = 4 -> 15%
-        report += "System {} prec/rec/f1: {:.1%} {:.1%} {:.3f}".format(
-            e, prec, rec, f1_score
-        )
-        report += "\nSystem {} prec/rec of matches only (nr. of matches): {:.0%} {:.0%} ({})".format(
-            e,
-            metrics["precision_of_matches"],
-            metrics["recall_of_matches"],
-            # metrics["non-matches"],
-            metrics["matches"],  # this seems to be incorrect -> 'non-matches' required?
-        )
-        report += (
-            "\n{} were exactly correct, out of {} predicted / the reference {}.".format(
-                metrics["exactmatches_precision"][0],
-                metrics["exactmatches_precision"][1],
-                metrics["exactmatches_recall"][1],
-            )
-        )
-        report += "\nExact-match prec/rec/f1: {:.1%} {:.1%} {:.3f}".format(
-            exactmatch_prec, exactmatch_rec, f1(exactmatch_prec, exactmatch_rec)
-        )
-        reports[f1_score] = report
-    sorted_reports = [a[1] for a in sorted(reports.items(), reverse=True)]
-    print("\n" + "\n\n".join(sorted_reports))
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
+    force=True,
+)
 
 
 def eval_system(gold, predictions):
     results = {}
     # Get a manytuples-to-manytuples match-score for each sentence,
     # then gather the scores across sentences and compute the weighted-average
-    cnt = 0
     for s, reference_tuples in gold.items():
         predicted_tuples = predictions.get(s, [])
         logging.info(f"Matching sentence {s}:")
@@ -90,9 +19,6 @@ def eval_system(gold, predictions):
         # 'precision': [1.0, 8], 'recall': [0.6, 4],
         # 'precision_of_matches': [1.0], 'recall_of_matches': [0.6],
         # 'exact_match_precision': [0, 8], 'exact_match_recall': [0, 4]
-        cnt += 1
-        # if cnt == 1:
-        #     break
 
     prec_num, prec_denom = 0, 0
     rec_num, rec_denom = 0, 0
@@ -378,7 +304,3 @@ def split_tuples_by_extractor(gold, tuples):
             else:
                 predictions_by_OIE[t["extractor"]][s] = [t]
     return predictions_by_OIE
-
-
-if __name__ == "__main__":
-    main()

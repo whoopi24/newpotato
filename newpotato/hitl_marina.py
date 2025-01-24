@@ -20,7 +20,7 @@ from newpotato.extractors.graphbrain_extractor_PC import GraphbrainMappedTriplet
 
 # TODO: do not use import * -> check which functions are needed
 from newpotato.modifications.oie_patterns import *
-from newpotato.modifications.pattern_ops import *  # all_variables
+from newpotato.modifications.pattern_ops import *  # all_variables, contains_variable
 from newpotato.modifications.patterns import PatternCounter
 
 
@@ -149,11 +149,11 @@ class HITLManager:
             "n_rules": self.extractor.get_n_rules(),
         }
 
-    def get_rules(self, *args, **kwargs):
-        return self.extractor.get_rules(self.text_to_triplets, *args, **kwargs)
+    def get_rules(self, top_n=20):
+        return self.extractor.get_rules(self.text_to_triplets, top_n)
 
-    def print_rules(self, console):
-        return self.extractor.print_rules(console)
+    # def print_rules(self, top_n):
+    #     return self.extractor.print_rules(self.text_to_triplets, top_n)
 
     def infer_triplets(self, sen: str, **kwargs) -> List[Triplet]:
         return self.extractor.infer_triplets(sen, **kwargs)
@@ -252,84 +252,16 @@ class HITLManager:
             yield from sens[:max_n]
 
     # my own functions
-    def parse_sent_with_ann_eval(
-        self,
-        patterns,
-        extractions,
-        max_items,
-        input="lsoie_wiki_dev.conll",
-    ):
-
-        # use load_and_map_lsoie(input_file, extractor) without mapping?
-        # replaced new parser with existing one from HITLManager
-
-        with open(input) as stream:
-            total, skipped = 0, 0
-            last_sent = ""
-            for sen_idx, sen in tqdm(enumerate(gen_tsv_sens(stream))):
-                if total == max_items:
-                    break
-                total += 1
-                words = [t[1] for t in sen]
-                sentence = " ".join(words)
-
-                # avoid double parsing - ONLY when Triplet creation not needed!
-                # remark: sen_idx skipped -> from 0 to xy with gaps
-                if sentence == last_sent:
-                    continue
-                else:
-                    last_sent = sentence
-
-                # text parsing and information extraction (prediction)
-                text_to_graph = self.extractor.get_graphs(sentence)
-                # TODO: how to handle skipped cases
-                if len(text_to_graph) > 1:
-                    logging.error(f"sentence split into two: {words}")
-                    logging.error(f"{text_to_graph=}")
-                    logging.error("skipping")
-                    skipped += 1
-                    # print(f"{sen_idx=}")
-                    # extractions[sen_idx] = []
-                    logging.error(f"{skipped=}, {total=}")
-                    continue
-
-                try:
-                    graph = text_to_graph[sentence]["main_edge"]
-                except:
-                    logging.error(f"{text_to_graph=}")
-                    logging.error("skipping")
-                    skipped += 1
-                    # print(f"{sen_idx=}")
-                    # extractions[sen_idx] = []
-                    continue
-                logging.debug(f"{sentence=}, {graph=}")
-
-                if graph:  # maybe not necessary
-                    atom2word = text_to_graph[sentence]["atom2word"]
-                    # print(f"{sentence=}, {graph=}, {atom2word=}")
-                    information_extraction(  # in oie_patterns.py
-                        extractions, graph, sen_idx, atom2word, patterns
-                    )
-
-        # return(extractions)
-
     # function needed for functional patterns
     def get_annotated_graphs(self) -> List[str]:
         """
         Get the annotated graphs.
         """
-
         return self.extractor.add_cases(self.text_to_triplets)
 
-        # self.extractor.add_cases(self.text_to_triplets)
-        # return self.extractor.get_annotated_graphs_from_classifier()
-
-    def generalise_graph(
-        self, top_n=50, method="supervised", check_vars=True, path="hg_test.db"
-    ):
-        # differentiate between supervised/unsupervised
+    def generalise_graph_unsupervised(self, method="unsupervised"):
         if method == "unsupervised":
-            # 1st version: simple unsupervised approach
+            # simple unsupervised approach
             pc = PatternCounter(
                 expansions={
                     "(* * *)",
@@ -349,227 +281,6 @@ class HITLManager:
                         continue
 
             return pc.patterns
-
-        elif method == "supervised":
-
-            # uses functional patterns from parsed sentences with mapped triplets
-            # UPDATE: removed adding the cases to the classifier and double parsing
-
-            patterns = Counter()
-            # TODO: conjunction decomposition, include special builder
-            # TODO: for hyperedge, positive in self.get_annotated_graphs(): -> what is more correct?
-            for hyperedge in self.get_annotated_graphs():
-                hyperedge = hedge(hyperedge)
-                # print(f"{hyperedge=}")
-                vars = all_variables(hyperedge)
-                # print(f"{vars.keys()=}")
-                if hyperedge.not_atom:
-                    # edges = conjunctions_decomposition(hyperedge, concepts=True)
-                    # print(f"{edges=}")
-                    # for edge in edges:
-                    # vars2 = all_variables(edge)
-                    # if len(vars) == len(vars2):
-                    pattern = generalise_edge(hyperedge)
-                    # print(f"{pattern=}")
-                    if pattern is None:
-                        # print("skipped - no pattern")
-                        continue
-                    elif check_vars:
-                        skip = False
-                        atoms = pattern.atoms()
-                        roots = {atom.root() for atom in atoms}
-                        for var in vars:
-                            # make sure to include all variables in the final pattern
-                            if str(var) in roots:
-                                continue
-                            else:
-                                # print("skipped - var missing")
-                                skip = True
-                                break
-                        if not skip:
-                            # if not positive:
-                            #     print(f"{hyperedge=}")
-                            # TODO: patterns without REL are counted - why?
-                            print("count: ", pattern)
-                            patterns[hedge(apply_curly_brackets(pattern))] += 1
-                    else:
-                        print("count: ", pattern)
-                        patterns[hedge(apply_curly_brackets(pattern))] += 1
-
-            return patterns
-
-            # 4th version - not tested!
-            # cases = [edge for edge, positive in self.extractor.classifier.cases if positive]
-            # for edge in cases:
-            #     pc.count(edge)
-
-            # 2nd version (https://graphbrain.net/tutorials/hypergraph-operations.html#parse-sentence-and-add-hyperedge-to-hypergraph)
-            # takes longer than 1st version with the use of an existing hg (with manipulated edges)
-            # necessary to set replace_yn=True when executing lsoie_gb.py
-            # not done yet !!
-            # pc = PatternCounter(
-            #     expansions={
-            #         "(* * *)",
-            #         "(* * * *)",
-            #     },
-            #     # match_roots={"+/B"},
-            #     count_subedges=False,
-            # )
-            # hg = hgraph(path)
-            # for edge in hg.all():
-            #     if hg.is_primary(edge):
-            #         pc.count(edge)
-
         else:
             print("Invalid method!")
             return Counter()
-
-    # def generalise_graph_v2(self, hg, top_n=50):
-
-    #     # transform hyperedges into abstract patterns
-    #     pc = PatternCounter(
-    #         expansions={
-    #             "(* * *)",
-    #             "(* * * *)",
-    #         },
-    #         match_roots={"+/B"},
-    #         count_subedges=False,
-    #     )
-
-    #     for e in hg.all():
-    #         if hg.is_primary(e):
-    #             try:
-    #                 pc.count(e)
-    #             except:
-    #                 continue
-
-    #     return pc.patterns.most_common(top_n)
-
-
-def extract_top_level_elements(hyperedge):
-    elements = []
-    stack = []
-    start_idx = 0
-
-    str_edge = str(hyperedge)
-
-    # remove outermost parentheses
-    if str_edge.startswith("(") and str_edge.endswith(")"):
-        str_edge = str_edge[1:-1]
-
-    for idx, char in enumerate(str_edge):
-        if char == "(":
-            if not stack:
-                start_idx = idx  # start of a top-level element
-            stack.append(char)
-        elif char == ")":
-            stack.pop()
-            if not stack:  # end of a top-level element
-                element = str_edge[start_idx : idx + 1]
-                elements.append(element)
-
-    return elements
-
-
-def extract_second_level(hyperedge):
-    top_level_elements = extract_top_level_elements(hyperedge)
-    second_level = []
-    # only consider relations of sizes 3 or 4
-    if len(top_level_elements) > 4:
-        # print("too many relations")
-        return second_level
-    # if len(top_level_elements) < 3:
-    #     print("not enough relations")
-    #     print(top_level_elements)
-    #     return second_level
-
-    for element in top_level_elements:
-        # keep "var" objects intact
-        if element.startswith("(var"):
-            second_level.append(element)
-        else:
-            # check for nested components
-            nested_elements = extract_top_level_elements(element)
-            # only unnest multiple components
-            if len(nested_elements) > 1:
-                second_level.append(nested_elements)
-            else:
-                second_level.append(element)
-
-    return second_level
-
-
-def edge2pattern(edge, root=False, subtype=False):
-    # print("edge2pattern-e: ", edge)
-    if root and edge.atom:
-        root_str = edge.root()
-    elif contains_variable(edge):
-        # print("contains var")
-        # count the number of unique variables
-        var_cnt = len(re.findall(r"\bvar\b", str(edge)))
-        if var_cnt > 1:
-            # print("multiple vars")
-            # print("edge2pattern-e: ", edge)
-            # at least two variables in second level hyperedge - does not meet conditions
-            return None
-        elif edge.contains("REL", deep=True):
-            root_str = "REL"
-        elif edge.contains("ARG0", deep=True):
-            root_str = "ARG0"
-        elif edge.contains("ARG1", deep=True):
-            root_str = "ARG1"
-        elif edge.contains("ARG2", deep=True):
-            root_str = "ARG2"
-        elif edge.contains("ARG3", deep=True):
-            root_str = "ARG3"
-        elif edge.contains("ARG4", deep=True):
-            root_str = "ARG4"
-        elif edge.contains("ARG5", deep=True):
-            root_str = "ARG5"
-        else:
-            # print("other problem")
-            root_str = "*"
-    else:
-        root_str = "*"
-    if subtype:
-        et = edge.type()
-    else:
-        et = edge.mtype()
-    pattern = "{}/{}".format(root_str, et)
-    ar = edge.argroles()
-    if ar == "":
-        # print("edge2pattern-p: ", hedge(pattern))
-        return hedge(pattern)
-    else:
-        # print("edge2pattern-p: ", hedge("{}.{}".format(pattern, ar)))
-        return hedge("{}.{}".format(pattern, ar))
-
-
-# function to generalise each hyperedge with functional patterns
-# generalisation approach: using var as root and adding main type (mtype) of edge after /
-# only consider recursive expansion to depth 2 for simplicity
-def generalise_edge(hyperedge):
-    second_level_result = extract_second_level(hyperedge)
-    # print(f"{second_level_result=}")
-    if len(second_level_result) == 0:
-        return None
-    final_result = []
-    for item in second_level_result:
-        if type(item) == list:
-            for i in item:
-                # print(f"{i=}")
-                newitem = edge2pattern(hedge(i))
-                # print(f"{newitem=}")
-                if newitem is not None:
-                    final_result.append(str(newitem))
-        else:
-            # print(f"{item=}")
-            newitem = edge2pattern(hedge(item))
-            # print(f"{newitem=}")
-            if newitem is not None:
-                final_result.append(str(newitem))
-
-    if None not in final_result:
-        return hedge(" ".join(final_result))
-    else:
-        return None

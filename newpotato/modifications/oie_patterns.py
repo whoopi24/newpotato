@@ -224,7 +224,7 @@ def main_conjunction(edge):
 
 
 # function to save extraction in the same format as WiRe57 data
-def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
+def add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3):
     # print(f"{sent_id=}")
     data = {"arg1": arg1, "rel": rel, "arg2": arg2, "extractor": "shg", "score": 1.0}
     if len(arg3) > 0:
@@ -257,7 +257,7 @@ def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
 
 
 def find_tuples(extractions, edge, sent_id, atom2word, patterns):
-    print(f"{sent_id=}")
+    # print(f"{sent_id=}")
     for pattern in patterns:
         atoms = hedge(pattern).atoms()
         roots = {atom.root() for atom in atoms if atom.root() != "*"}
@@ -295,8 +295,8 @@ def find_tuples(extractions, edge, sent_id, atom2word, patterns):
             if "ARG3" in match.keys():
                 arg3.append(label(match["ARG3"], atom2word))
 
-            print(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
-            add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3)
+            # print(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
+            add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3)
 
 
 def information_extraction(extractions, main_edge, sent_id, atom2word, patterns):
@@ -304,12 +304,17 @@ def information_extraction(extractions, main_edge, sent_id, atom2word, patterns)
     if main_edge.is_atom():
         return
     if main_edge.type()[0] == "R":
-        edges = conjunctions_decomposition(main_edge, concepts=True)
-        for edge in edges:
-            # main_conjunction_edge = main_conjunction(edge)
-            # print(f"find_tuples() for {main_conjunction_edge=}")
-            find_tuples(
-                extractions, main_conjunction(edge), sent_id, atom2word, patterns
+        try:  # IndexError: tuple index out of range: if edge[0].type() == 'J' and edge.mtype() != 'C':
+            edges = conjunctions_decomposition(main_edge, concepts=True)
+            for edge in edges:
+                # main_conjunction_edge = main_conjunction(edge)
+                # print(f"find_tuples() for {main_conjunction_edge=}")
+                find_tuples(
+                    extractions, main_conjunction(edge), sent_id, atom2word, patterns
+                )
+        except IndexError:
+            logging.error(
+                f"Issue with conjunction decomposition for one of the subedges of {main_edge=}"
             )
     for edge in main_edge:
         information_extraction(extractions, edge, sent_id, atom2word, patterns)
