@@ -1,27 +1,15 @@
 import json
 import logging
-import os
-import pickle
 import random
-import re
-import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Generator, List, Optional  # , Tuple
+from typing import Any, Dict, Generator, List, Optional
 
-from graphbrain.learner.classifier import apply_curly_brackets
-from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
-from tqdm import tqdm
-from tuw_nlp.text.utils import gen_tsv_sens, tuple_if_list
+from tuw_nlp.text.utils import tuple_if_list
 
 from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
 from newpotato.extractors.graphbrain_extractor_PC import GraphbrainMappedTriplet
-
-# TODO: do not use import * -> check which functions are needed
-from newpotato.modifications.oie_patterns import *
-from newpotato.modifications.pattern_ops import *  # all_variables, contains_variable
-from newpotato.modifications.patterns import PatternCounter
 
 
 @dataclass
@@ -150,7 +138,9 @@ class HITLManager:
         }
 
     def get_rules(self, top_n=20):
-        return self.extractor.get_rules(self.text_to_triplets, top_n)
+        return self.extractor.get_rules(
+            text_to_triplets=self.text_to_triplets, top_n=top_n
+        )
 
     # def print_rules(self, top_n):
     #     return self.extractor.print_rules(self.text_to_triplets, top_n)
@@ -259,28 +249,28 @@ class HITLManager:
         """
         return self.extractor.add_cases(self.text_to_triplets)
 
-    def generalise_graph_unsupervised(self, method="unsupervised"):
-        if method == "unsupervised":
-            # simple unsupervised approach
-            pc = PatternCounter(
-                expansions={
-                    "(* * *)",
-                    "(* * * *)",
-                },
-                match_roots={"+/B"},
-                count_subedges=False,
-            )
-            for _, graph in self.extractor.parsed_graphs.items():
-                edge = graph["main_edge"]
-                # exclusion of conjunctions
-                edges = conjunctions_decomposition(edge, concepts=True)
-                for e in edges:
-                    try:
-                        pc.count(e)
-                    except:
-                        continue
+    # def generalise_graph_unsupervised(self, method="unsupervised"):
+    #     if method == "unsupervised":
+    #         # simple unsupervised approach
+    #         pc = PatternCounter(
+    #             expansions={
+    #                 "(* * *)",
+    #                 "(* * * *)",
+    #             },
+    #             match_roots={"+/B"},
+    #             count_subedges=False,
+    #         )
+    #         for _, graph in self.extractor.parsed_graphs.items():
+    #             edge = graph["main_edge"]
+    #             # exclusion of conjunctions
+    #             edges = conjunctions_decomposition(edge, concepts=True)
+    #             for e in edges:
+    #                 try:
+    #                     pc.count(e)
+    #                 except:
+    #                     continue
 
-            return pc.patterns
-        else:
-            print("Invalid method!")
-            return Counter()
+    #         return pc.patterns
+    #     else:
+    #         print("Invalid method!")
+    #         return Counter()

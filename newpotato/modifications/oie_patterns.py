@@ -1,21 +1,11 @@
 import logging
 import operator
 import re
-import sys
-from typing import Any, Dict
 
-from graphbrain.hyperedge import UniqueAtom, hedge
+from graphbrain.hyperedge import hedge
 from graphbrain.utils.conjunctions import conjunctions_decomposition
 
-# from graphbrain.patterns import match_pattern
 from newpotato.modifications.patterns import _matches_atomic_pattern, match_pattern
-
-# from graphbrain.parsers.text import edge_text
-
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    stream=sys.stderr, format="%(levelname)s:%(message)s", level=logging.DEBUG
-)
 
 
 # copied from: https://stackoverflow.com/questions/71732405/splitting-words-by-whitespace-without-affecting-brackets-content-using-regex
@@ -39,7 +29,7 @@ def split_pattern(s):
             temp += ch
     if temp != "":
         result.append(temp[:])
-    logger.debug(f"split {s} into {result}")
+    logging.debug(f"split {s} into {result}")
     return result
 
 
@@ -49,7 +39,7 @@ def _simplify_patterns(edge, strict):
     for i in range(0, len(e1)):
         s1 = hedge(e1[i])
         if len(s1) > 1:
-            logger.debug(f"recursion needed")
+            logging.debug(f"recursion needed")
             s = _simplify_patterns(s1, strict)
             final.append(str(s))
         # ignore argroles for variables and concepts
@@ -70,7 +60,7 @@ def _simplify_patterns_v0(edge):
     for i in range(0, len(e1)):
         s1 = e1[i]
         if s1.count(" ") > 0:
-            logger.debug(f"recursion needed")
+            logging.debug(f"recursion needed")
             s = _simplify_patterns_v0(s1)
             final.append(str(s))
         # ignore argroles for concepts
@@ -97,7 +87,7 @@ def simplify_patterns(mylist, strict=False):
     # create dictionary with patterns as keys and counts as values
     for p, cnt in mylist:
         new_p = _simplify_patterns(p, strict)
-        logger.debug(f"convert {p} into {new_p}")
+        logging.debug(f"convert {p} into {new_p}")
         mydict[new_p] = mydict.get(new_p, 0) + cnt
         total_cnt += cnt
     simplifed_patterns = sorted(
@@ -110,7 +100,7 @@ def compare_patterns(edge1, edge2):
     e1 = split_pattern(edge1)
     e2 = split_pattern(edge2)
     if len(e1) == len(e2):
-        logger.debug(f"patterns have equal length")
+        logging.debug(f"patterns have equal length")
         final = []
         for i in range(0, len(e1)):
             s1 = e1[i]
@@ -119,18 +109,18 @@ def compare_patterns(edge1, edge2):
             if s1 == s2:
                 final.append(s1)
             elif s1.count(" ") == s2.count(" ") and s1.count(" ") > 0:
-                logger.debug(f"recursion needed")
+                logging.debug(f"recursion needed")
                 s3 = compare_patterns(s1, s2)
                 if s3 is None:
-                    logger.debug(f"patterns cannot be compressed")
+                    logging.debug(f"patterns cannot be compressed")
                     return None
                 else:
                     final.append("".join(s3))  # type: ignore
             elif s1.count(" ") > 0 or s2.count(" ") > 0:
-                logger.debug(f"patterns cannot be compressed")
+                logging.debug(f"patterns cannot be compressed")
                 return None
             elif s1[:3] == s2[:3]:
-                logger.debug(f"patterns have common characters")
+                logging.debug(f"patterns have common characters")
                 # compare each character of the string
                 s3 = []
                 iter = 0
@@ -141,16 +131,16 @@ def compare_patterns(edge1, edge2):
                     elif k == l:
                         s3.append(k)
                     else:
-                        logger.debug(f"patterns were compressed")
+                        logging.debug(f"patterns were compressed")
                         s3.append("[" + k + l + "]")
                 final.append("".join(s3))
             else:
-                logger.debug(f"patterns cannot be compressed")
+                logging.debug(f"patterns cannot be compressed")
                 return None
         final = "(" + " ".join(final) + ")"
         return final  # hedge(final) not possible because of recursion
     else:
-        logger.debug(f"patterns have unequal length")
+        logging.debug(f"patterns have unequal length")
         return None
 
 
@@ -172,11 +162,11 @@ def compress_patterns(mylist):
         for key2 in mydict:
             if key == key2 or key2 in used_keys:
                 continue
-            logger.debug(f"Compare {key} against {key2}")
+            logging.debug(f"Compare {key} against {key2}")
             res = compare_patterns(key, key2)
             if res is not None:
                 res = hedge(res)
-                logger.debug(f"Compression found: {res}")
+                logging.debug(f"Compression found: {res}")
                 compressed[res] = mydict.get(res, 0) + mydict[key] + mydict[key2]
                 used_keys.append(key)
                 used_keys.append(key2)
@@ -225,7 +215,6 @@ def main_conjunction(edge):
 
 # function to save extraction in the same format as WiRe57 data
 def add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3):
-    # print(f"{sent_id=}")
     data = {"arg1": arg1, "rel": rel, "arg2": arg2, "extractor": "shg", "score": 1.0}
     if len(arg3) > 0:
         data["arg3+"] = arg3
@@ -236,11 +225,13 @@ def add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3):
         if len(arg3) > 0:
             data["arg3+"] = arg3
         extractions[sent_id] = [data]
+        logging.info(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
     # case 2: new triplet arg1, rel, arg2 for existing sentence
     elif data not in extractions[sent_id]:
         if len(arg3) > 0:
             data["arg3+"] = arg3
         extractions[sent_id].append(data)
+        logging.info(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
     # case 3: new argument arg3+ for existing triplet arg1, rel, arg2
     elif len(arg3) > 0:
         existing_extr = extractions[sent_id]
@@ -252,12 +243,14 @@ def add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3):
                     for arg3_item in arg3:
                         if arg3_item not in existing_extr[idx]["arg3+"]:
                             existing_extr[idx]["arg3+"] += arg3_item
+                            logging.info(f"{arg1=}, {rel=}, {arg2=}, arg3={arg3_item}")
                 else:
                     existing_extr[idx]["arg3+"] = arg3
+                    logging.info(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
 
 
 def find_tuples(extractions, edge, sent_id, atom2word, patterns):
-    # print(f"{sent_id=}")
+    logging.info(f"{sent_id=}, {edge=}")
     for pattern in patterns:
         atoms = hedge(pattern).atoms()
         roots = {atom.root() for atom in atoms if atom.root() != "*"}
@@ -266,25 +259,18 @@ def find_tuples(extractions, edge, sent_id, atom2word, patterns):
             # print("skipped")
             continue
         for match in match_pattern(edge, pattern):
-            # print(f"{match=}")
+            # logging.info(f"{pattern=}, {match=}")
             # skip missing/incomplete matches
             if match == {} or len(match) != len(roots):
                 # print("skipped")
                 continue
-            # print(f"{pattern=}")
-            # print(f"{match=}")
 
             # attention: arg1 = ARG0; arg2 = ARG1
+            # TODO: handle patterns without arg2 (=ARG1)
             arg1 = label(match["ARG0"], atom2word)
             arg2 = label(match["ARG1"], atom2word)
             # relation cannot be splitted (REL1/REL2)
             rel = label(match["REL"], atom2word)
-
-            # TODO: structure the code below, e.g. going through every match.keys() and save all existing keys
-            # if "ARG1" in match.keys():
-            #     arg1 = label(match["ARG1"], atom2word)
-            # else:
-            #     arg1 = {}
 
             if "ARG2" in match.keys():
                 arg3 = [label(match["ARG2"], atom2word)]
@@ -292,23 +278,22 @@ def find_tuples(extractions, edge, sent_id, atom2word, patterns):
                 arg3 = []
 
             # the following case is rare (not in top20 pattern)
+            # TODO: handle this case correctly
             if "ARG3" in match.keys():
                 arg3.append(label(match["ARG3"], atom2word))
 
-            # print(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
             add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3)
 
 
 def information_extraction(extractions, main_edge, sent_id, atom2word, patterns):
-    # print(f"{sent_id=}, {main_edge=}")
+    # logging.info(f"{sent_id=}, {main_edge=}")
     if main_edge.is_atom():
         return
     if main_edge.type()[0] == "R":
         try:  # IndexError: tuple index out of range: if edge[0].type() == 'J' and edge.mtype() != 'C':
             edges = conjunctions_decomposition(main_edge, concepts=True)
             for edge in edges:
-                # main_conjunction_edge = main_conjunction(edge)
-                # print(f"find_tuples() for {main_conjunction_edge=}")
+                logging.debug(f"find_tuples() for {main_conjunction(edge)=}")
                 find_tuples(
                     extractions, main_conjunction(edge), sent_id, atom2word, patterns
                 )

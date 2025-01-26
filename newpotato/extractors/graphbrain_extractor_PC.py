@@ -437,9 +437,9 @@ class GraphbrainExtractor(Extractor):
         # TODO: for hyperedge, positive in self.get_annotated_graphs(): -> what is more correct?
         for hyperedge in annotated_graphs:
             hyperedge = hedge(hyperedge)
-            # print(f"{hyperedge=}")
+            logging.debug(f"{hyperedge=}")
             vars = all_variables(hyperedge)
-            # print(f"{vars.keys()=}")
+            logging.debug(f"{vars.keys()=}")
             if hyperedge.not_atom:
                 # edges = conjunctions_decomposition(hyperedge, concepts=True)
                 # print(f"{edges=}")
@@ -447,9 +447,9 @@ class GraphbrainExtractor(Extractor):
                 # vars2 = all_variables(edge)
                 # if len(vars) == len(vars2):
                 pattern = generalise_edge(hyperedge)
-                # print(f"{pattern=}")
+                logging.debug(f"{pattern=}")
                 if pattern is None:
-                    # print("skipped - no pattern")
+                    logging.debug("skipped - no pattern")
                     continue
                 # TODO: eliminate this elif - should always be true
                 elif check_vars:
@@ -461,18 +461,19 @@ class GraphbrainExtractor(Extractor):
                         if str(var) in roots:
                             continue
                         else:
-                            # print("skipped - var missing")
+                            logging.debug("skipped - var missing")
                             skip = True
                             break
                     if not skip:
                         # if not positive:
                         #     print(f"{hyperedge=}")
                         # TODO: patterns without REL are counted - why?
-                        print("count: ", pattern)
+                        logging.debug("count: ", pattern)
                         patterns[hedge(apply_curly_brackets(pattern))] += 1
                 else:
                     # TODO: do i want this else clause?
-                    print("count: ", pattern)
+                    logging.debug("else case")
+                    logging.debug("count: ", pattern)
                     patterns[hedge(apply_curly_brackets(pattern))] += 1
 
         return patterns
@@ -748,39 +749,8 @@ class GraphbrainExtractor(Extractor):
                     last_id = sen_idx
                     sent_cnt += 1
                     skip = False
-                    # text parsing (only if needed)
-                    text_to_graph = self.get_graphs(sentence)
-                    # TODO: how to handle skipped cases
-                    # quick solution for now: skip gold data creation as well
-                    if len(text_to_graph) > 1:
-                        logging.error(f"sentence split into two: {words}")
-                        logging.error(f"{text_to_graph=}")
-                        logging.error("skipping")
-                        skipped += 1
-                        skip = True
-                        logging.error(f"{skipped=}, {total=}")
 
-                    # TODO: investigate why this try/except is needed
-                    try:
-                        graph = text_to_graph[sentence]["main_edge"]
-                    except:
-                        logging.error(f"{text_to_graph=}")
-                        logging.error("skipping")
-                        skipped += 1
-                        skip = True
-                        logging.error(f"{skipped=}, {total=}")
-                    logging.debug(f"{sentence=}, {graph=}")
-
-                    # TODO: check if necessary
-                    # generating triplets after conjunction decomposition (inside information_extraction())
-                    if graph and not skip:
-                        atom2word = text_to_graph[sentence]["atom2word"]
-                        # print(f"{sentence=}, {graph=}, {atom2word=}")
-                        information_extraction(  # in oie_patterns.py
-                            extractions, graph, sen_idx, atom2word, self.patterns
-                        )
-
-                    # add gold_dict to gold_list for last sentence (but skip the very first)
+                    # Step 1: add gold_dict to gold_list for last sentence (but skip the very first)
                     if total > 1:
                         # combine arg3-arg6 to "arg3+"
                         keys_to_combine = ["arg3", "arg4", "arg5", "arg6"]
@@ -802,8 +772,19 @@ class GraphbrainExtractor(Extractor):
                         # Add to the list under a new key
                         gold_dict["tuples"] = tuples_list
                         gold_list.append(gold_dict)
+                        logging.info("--------- Gold tuples ---------")
+                        for tup in gold_dict["tuples"]:
+                            for key in tup:
+                                if key == "arg3+":
+                                    logging.info("arg3+:")
+                                    for arg in tup["arg3+"]:
+                                        logging.info(f"    - {' '.join(arg['words'])}")
+                                else:
+                                    logging.info(
+                                        f"{key}: {' '.join(tup[key]['words'])}"
+                                    )
 
-                    # create new gold_dict for new sentence
+                    # Step 2: create new gold_dict for new sentence
                     gold_dict = {
                         "id": str(sen_idx),
                         "sent": sentence,
@@ -811,7 +792,44 @@ class GraphbrainExtractor(Extractor):
                         "tuples": list(),
                     }
 
-                # gold data creation: add multiple triplets to gold_dict for one sentence
+                    # Step 3: text parsing for new sentence (only if needed)
+                    text_to_graph = self.get_graphs(sentence)
+                    # TODO: how to handle skipped cases
+                    # possible solution: skip gold data creation as well (not implemented yet)
+                    if len(text_to_graph) > 1:
+                        logging.error(f"sentence split into two: {words}")
+                        logging.error(f"{text_to_graph=}")
+                        logging.error("skipping")
+                        skipped += 1
+                        skip = True
+                        logging.error(f"{skipped=}, {total=}")
+
+                    # TODO: investigate why this try/except is needed
+                    try:
+                        graph = text_to_graph[sentence]["main_edge"]
+                    except:
+                        logging.error(f"{text_to_graph=}")
+                        logging.error("skipping")
+                        skipped += 1
+                        skip = True
+                        logging.error(f"{skipped=}, {total=}")
+                    logging.debug(f"{sentence=}, {graph=}")
+
+                    # TODO: check if 'if graph' is necessary
+                    # Step 4: generating triplets after conjunction decomposition (information_extraction)
+                    if graph and not skip:
+                        atom2word = text_to_graph[sentence]["atom2word"]
+                        logging.info("-" * 100)
+                        logging.info(f"START of information extraction for {sen_idx=}:")
+                        logging.info(f"{sentence=}")
+                        logging.info(f"{graph=}")
+                        # logging.info(f"{atom2word=}")
+                        information_extraction(  # in oie_patterns.py
+                            extractions, graph, sen_idx, atom2word, self.patterns
+                        )
+
+                # Step 5: gold data creation
+                # add multiple triplets to gold_dict for one sentence
                 temp = {k: defaultdict(list) for k in name_mapping.keys()}
                 for i, tok in enumerate(sen):
                     # 'text': '(The second)/(The second danger to a year of relatively healthy global economic growth)',

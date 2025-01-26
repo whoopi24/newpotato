@@ -2,6 +2,14 @@ import argparse
 import json
 import logging
 
+logging.basicConfig(
+    format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # To print logs to the console
+        logging.FileHandler("logs.log", mode="w"),  # To save logs to a file
+    ],
+)
+
 from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
@@ -9,7 +17,8 @@ from tqdm import tqdm
 from newpotato.evaluate.eval_hitl import HITLEvaluator
 from newpotato.evaluate.wire_functions import *
 from newpotato.hitl_marina import HITLManager
-from newpotato.modifications.oie_patterns import *
+
+# from newpotato.modifications.oie_patterns import *
 from newpotato.utils import get_triplets_from_user, print_tokens
 
 console = Console()
@@ -156,6 +165,9 @@ class NPTerminalClient:
                 )
 
         # gold data creation and prediction for LSOIE data
+        console.print(
+            "[bold cyan]gold data creation and inferring triplets[/bold cyan]"
+        )
         if data:
             # data = "lsoie_wiki_dev.conll"
             self.hitl.extractor.temporary_triplets_creation(
@@ -175,6 +187,7 @@ class NPTerminalClient:
                 return
 
         # evaluate triplets with WiRe57 scorer
+        console.print("[bold cyan]evaluation with wire scorer[/bold cyan]")
         gold_data = data.split(".")[0] + "_gold.json"
         pred_data = data.split(".")[0] + "_pred.json"
         reference = json.load(open(gold_data))
@@ -471,10 +484,10 @@ def get_args():
 
 def main():
     args = get_args()
-    logging.basicConfig(
-        format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-        force=True,
-    )
+    # logging.basicConfig(
+    #     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
+    #     force=True,
+    # )
     logging.getLogger().setLevel(logging.WARNING)
     if args.interactive or args.verbose:
         logging.getLogger().setLevel(logging.INFO)

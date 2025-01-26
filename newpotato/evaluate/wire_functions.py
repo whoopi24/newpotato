@@ -1,10 +1,7 @@
 import logging
 
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-    force=True,
-)
+# Create a logger for this module
+logger = logging.getLogger(__name__)
 
 
 def eval_system(gold, predictions):
@@ -13,7 +10,7 @@ def eval_system(gold, predictions):
     # then gather the scores across sentences and compute the weighted-average
     for s, reference_tuples in gold.items():
         predicted_tuples = predictions.get(s, [])
-        logging.info(f"Matching sentence {s}:")
+        logger.info(f"Matching sentence {s}:")
         results[s] = sentence_match(reference_tuples, predicted_tuples)
         # returns dict with
         # 'precision': [1.0, 8], 'recall': [0.6, 4],
@@ -81,29 +78,29 @@ def sentence_match(gold, predicted):
             exact_match_scores[i][j] = tuple_exact_match(pt, gt)
             scores[i][j] = tuple_match(pt, gt)  # this is a pair [prec,rec] or False
 
-            logging.info(f"Matching gold tuple:")
+            logger.info(f"Matching gold tuple:")
             for key in gt:
                 if key == "arg3+":
-                    logging.info("arg3+:")
+                    logger.info("arg3+:")
                     for arg in gt["arg3+"]:
-                        logging.info(f"    - {' '.join(arg['words'])}")
+                        logger.info(f"    - {' '.join(arg['words'])}")
                 else:
-                    logging.info(f"{key}: {' '.join(gt[key]['words'])}")
+                    logger.info(f"{key}: {' '.join(gt[key]['words'])}")
 
-            logging.info(f"with predicted tuple:")
+            logger.info(f"with predicted tuple:")
             for key, value in pt.items():
                 if key == "arg3+":
                     for arg in value:
-                        logging.info(f"{key}: {arg}")
+                        logger.info(f"{key}: {arg}")
                 elif key in ["arg1", "rel", "arg2"]:
-                    logging.info(f"{key}: {value}")
-            logging.info("-" * 30)
-            logging.info(f"exact match score: {exact_match_scores[i][j]}")
-            logging.info(f"partial match score: {scores[i][j]}")
-            logging.info("-" * 30)
+                    logger.info(f"{key}: {value}")
+            logger.info("-" * 30)
+            logger.info(f"exact match score: {exact_match_scores[i][j]}")
+            logger.info(f"partial match score: {scores[i][j]}")
+            logger.info("-" * 30)
 
-    logging.info(f"exact match scores: {exact_match_scores}")
-    logging.info(f"partial match scores: {scores}")
+    # logger.info(f"exact match scores: {exact_match_scores}")
+    # logger.info(f"partial match scores: {scores}")
     scoring_metrics = aggregate_scores_greedily(scores)
     exact_match_summary = aggregate_exact_matches(exact_match_scores)
     scoring_metrics["exact_match_precision"] = exact_match_summary["precision"]
