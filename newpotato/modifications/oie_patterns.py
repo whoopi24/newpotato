@@ -4,6 +4,7 @@ import re
 
 from graphbrain.hyperedge import hedge
 from graphbrain.utils.conjunctions import conjunctions_decomposition
+from rapidfuzz import process
 
 from newpotato.modifications.patterns import _matches_atomic_pattern, match_pattern
 
@@ -180,6 +181,14 @@ def compress_patterns(mylist):
 
 
 # functions for evaluation (from openie.py)
+
+
+# function to find matching key in dictionary with small changes
+def get_closest_key(target, key_dict) -> str:
+    closest_match, score, _ = process.extractOne(target, key_dict.keys())
+    return closest_match if score > 80 else ""
+
+
 def edge_text(atom2word, edge):
     atoms = edge.all_atoms()
     # problem: no matches found
@@ -190,6 +199,12 @@ def edge_text(atom2word, edge):
     # not very clean solution, but it works
     atom2word = {str(k): v for k, v in atom2word.items()}
     words = [atom2word[str(atom)] for atom in atoms if str(atom) in atom2word.keys()]
+    if len(words) == 0:
+        modified_atoms = [get_closest_key(str(atom), atom2word) for atom in atoms]
+        words = [atom2word[atom] for atom in modified_atoms if len(atom) > 0]
+        if len(words) == 0:
+            logging.error("matching issue (edge <> atom2word)")
+
     words.sort(key=lambda word: word[1])
     # print(f"{words=}")
     text = " ".join([word[0] for word in words])
@@ -259,7 +274,7 @@ def find_tuples(extractions, edge, sent_id, atom2word, patterns):
             # print("skipped")
             continue
         for match in match_pattern(edge, pattern):
-            # logging.info(f"{pattern=}, {match=}")
+            # logging.debug(f"{pattern=}, {match=}")
             # skip missing/incomplete matches
             if match == {} or len(match) != len(roots):
                 # print("skipped")
@@ -271,6 +286,9 @@ def find_tuples(extractions, edge, sent_id, atom2word, patterns):
             arg2 = label(match["ARG1"], atom2word)
             # relation cannot be splitted (REL1/REL2)
             rel = label(match["REL"], atom2word)
+
+            if len(rel) == 0:
+                logging.info(f"{match['REL']=}, {atom2word=}")
 
             if "ARG2" in match.keys():
                 arg3 = [label(match["ARG2"], atom2word)]
