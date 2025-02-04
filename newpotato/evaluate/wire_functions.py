@@ -10,7 +10,10 @@ def eval_system(gold, predictions):
     # then gather the scores across sentences and compute the weighted-average
     for s, reference_tuples in gold.items():
         predicted_tuples = predictions.get(s, [])
-        logger.info(f"Matching sentence {s}:")
+        if not reference_tuples:
+            logger.info(f"Skipping sentence {s} - no valid gold tuples")
+            continue
+        logger.info(f"Matching sentence {s}")
         results[s] = sentence_match(reference_tuples, predicted_tuples)
         # returns dict with
         # 'precision': [1.0, 8], 'recall': [0.6, 4],
@@ -147,7 +150,6 @@ def aggregate_scores_greedily(scores):
         "precision_of_matches": prec_scores,
         "recall_of_matches": rec_scores,
     }
-    # print(scoring_metrics)
     return scoring_metrics
 
 
