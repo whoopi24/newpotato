@@ -1,8 +1,8 @@
-import itertools
 import json
 import logging
 import re
 from collections import Counter, defaultdict
+from itertools import islice, product
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
 from graphbrain.hyperedge import Hyperedge, hedge
@@ -82,7 +82,7 @@ def edge2toks(edge: Hyperedge, graph: Dict[str, Any]):
             return set()
 
         hyp_sets = []
-        for cand in itertools.product(*to_disambiguate):
+        for cand in product(*to_disambiguate):
             hyp_toks = sorted(toks | set(cand))
             hyp_length = hyp_toks[-1] - hyp_toks[0]
             hyp_sets.append((hyp_length, hyp_toks))
@@ -207,10 +207,18 @@ def _toks2subedge(
     logging.debug(f"_toks2subedge got: {edge=}, {words_to_cover=}")
     if edge.is_atom():
         lowered_word = edge.label().lower()
+        # added this if clause to handle hyphenated tokens
         if lowered_word not in words_to_i:
-            assert (
-                lowered_word in NON_WORD_ATOMS
-            ), f"no token corresponding to edge label {lowered_word} and it is not listed as a non-word atom"
+            logging.debug(f"{lowered_word=}, {words_to_i=}")
+            cands = [key for key in words_to_i if lowered_word in key]
+            if len(cands) == 1:
+                lowered_word = cands[0]
+            else:
+                logging.error(
+                    f"no token corresponding to edge label {lowered_word} and it is not listed as a non-word atom"
+                )
+                logging.error(f"return empty sets")
+                return edge, set(), set()
 
         toks = words_to_i[lowered_word]
         relevant_toks = toks & toks_to_cover
@@ -388,12 +396,14 @@ class GraphbrainExtractor(Extractor):
             for line in self.patterns:
                 f.write(f"{line}\n")
 
-    def load_patterns(self, fn: str):
+    def load_patterns(self, fn: str, N: int = 20):
         with open(fn, "r") as f:
-            # self.patterns = f.readlines()
-            self.patterns = f.read().splitlines()
-        # with open(fn, "r") as f:
-        #     self.patterns = json.load(f)
+            self.patterns = list(islice(f, N))
+
+        if len(self.patterns) < N:
+            raise ValueError(
+                f"The file {fn} contains only {len(self.patterns)} patterns, but {N} were requested."
+            )
 
     def _parse_text(self, text: str) -> List[GraphParse]:
         """
@@ -425,7 +435,7 @@ class GraphbrainExtractor(Extractor):
         self.patterns = [key for key, _ in pc.most_common(top_n)]
         return [key for key, _ in pc.most_common(top_n)]
 
-    def extract_rules(self, text_to_triplets=None, check_vars=True) -> Counter:
+    def extract_rules(self, text_to_triplets=None) -> Counter:
         """
         Extract the rules from the annotated graphs.
         """
@@ -434,7 +444,7 @@ class GraphbrainExtractor(Extractor):
         patterns = Counter()
 
         # TODO: conjunction decomposition, include special builder
-        # TODO: for hyperedge, positive in self.get_annotated_graphs(): -> what is more correct?
+        # TODO: for hyperedge, positive in self.add_cases(text_to_triplets): -> what is more correct?
         for hyperedge in annotated_graphs:
             hyperedge = hedge(hyperedge)
             logging.debug(f"{hyperedge=}")
@@ -442,38 +452,27 @@ class GraphbrainExtractor(Extractor):
             logging.debug(f"{vars.keys()=}")
             if hyperedge.not_atom:
                 # edges = conjunctions_decomposition(hyperedge, concepts=True)
-                # print(f"{edges=}")
-                # for edge in edges:
-                # vars2 = all_variables(edge)
-                # if len(vars) == len(vars2):
                 pattern = generalise_edge(hyperedge)
                 logging.debug(f"{pattern=}")
                 if pattern is None:
                     logging.debug("skipped - no pattern")
                     continue
-                # TODO: eliminate this elif - should always be true
-                elif check_vars:
-                    skip = False
-                    atoms = pattern.atoms()
-                    roots = {atom.root() for atom in atoms}
-                    for var in vars:
-                        # make sure to include all variables in the final pattern
-                        if str(var) in roots:
-                            continue
-                        else:
-                            logging.debug("skipped - var missing")
-                            skip = True
-                            break
-                    if not skip:
-                        # if not positive:
-                        #     print(f"{hyperedge=}")
-                        # TODO: patterns without REL are counted - why?
-                        logging.debug("count: ", pattern)
-                        patterns[hedge(apply_curly_brackets(pattern))] += 1
-                else:
-                    # TODO: do i want this else clause?
-                    logging.debug("else case")
-                    logging.debug("count: ", pattern)
+
+                skip = False
+                atoms = pattern.atoms()
+                roots = {atom.root() for atom in atoms}
+                for var in vars:
+                    # make sure to include all variables in the final pattern
+                    if str(var) in roots:
+                        continue
+                    else:
+                        logging.debug("skipped - var missing")
+                        skip = True
+                        break
+                if not skip:
+                    # if not positive:
+                    #     print(f"{hyperedge=}")
+                    logging.debug(f"count: {pattern}")
                     patterns[hedge(apply_curly_brackets(pattern))] += 1
 
         return patterns
@@ -493,19 +492,17 @@ class GraphbrainExtractor(Extractor):
         cases = []
 
         for text, triplets in text_to_triplets.items():
-            # print(f"{text=}")
             graph = self.parsed_graphs[text]
             main_edge = graph["main_edge"]
             for triplet, positive in triplets:
-                # print(f"{triplet.variables=}")
+                logging.debug(f"{text=}, {triplet.variables=}, {positive=}")
                 variables = {
                     key: hedge(flatten_and_join_list(value))
                     for key, value in triplet.variables.items()
                 }
-                # print(f"{variables=}")
                 vedge = apply_variables(main_edge, variables)
-                # print(f"{vedge=}")
                 if vedge is None:
+                    logging.debug(f"{main_edge=}, {variables=}")
                     logging.debug("failed to add case.")
                     continue
                 else:
@@ -649,7 +646,9 @@ class GraphbrainExtractor(Extractor):
         """
         helper function for map_triplet
         """
-        all_toks = tuple(tok.text for tok in sen_graph["spacy_sentence"])
+        # tok.text for tok in sen_graph["spacy_sentence"]
+        # misses punctuation marks -> shifted indices
+        all_toks = tuple(triplet.toks)
         words_to_i = defaultdict(set)
         for i, word in enumerate(all_toks):
             words_to_i[word.lower()].add(i)
@@ -661,8 +660,9 @@ class GraphbrainExtractor(Extractor):
             rel_edge, relevant_toks, exact_match = toks2subedge(
                 edge, triplet.pred, all_toks, words_to_i
             )
+            logging.debug(f"{rel_edge=}, {relevant_toks=}, {exact_match=}")
             if not exact_match and strict:
-                logging.warning(
+                logging.debug(
                     f"cannot map pred {triplet.pred} to subedge of {edge} (closest: {rel_edge}"
                 )
                 raise UnmappableTripletError
@@ -677,8 +677,9 @@ class GraphbrainExtractor(Extractor):
                 arg_edge, relevant_toks, exact_match = toks2subedge(
                     edge, triplet.args[i], all_toks, words_to_i
                 )
+                logging.debug(f"{arg_edge=}, {relevant_toks=}, {exact_match=}")
                 if not exact_match and strict:
-                    logging.warning(
+                    logging.debug(
                         f"cannot map arg {triplet.args[i]} to subedge of {edge} (closest: {arg_edge}"
                     )
                     raise UnmappableTripletError()
@@ -687,9 +688,10 @@ class GraphbrainExtractor(Extractor):
             else:
                 mapped_args.append(None)
 
+        logging.debug(f"{mapped_pred=}, {mapped_args=}, {variables=}")
         return mapped_pred, mapped_args, variables
 
-    def map_triplet(self, triplet, sentence, strict=False):
+    def map_triplet(self, triplet, sentence, strict=True):
         """
         map predicate and arguments of a triplet (each a tuple of token indices) to
         corresponding subgraphs (Hyperedges). The mapping may change the indices, since words
@@ -702,9 +704,9 @@ class GraphbrainExtractor(Extractor):
                 triplet, sen_graph, strict=strict
             )
         except UnmappableTripletError:
-            logging.warning(
-                f"could not map triplet ({triplet.pred=}, {triplet.args=} to {sen_graph=}"
-            )
+            # logging.warning(
+            #     f"could not map triplet ({triplet.pred=}, {triplet.args=} to {sen_graph=}"
+            # )
             return False
         else:
             toks = self.get_tokens(sentence)
@@ -722,6 +724,7 @@ class GraphbrainExtractor(Extractor):
             "A3": "arg4",
             "A4": "arg5",
             "A5": "arg6",
+            "A6": "arg7",
         }
 
         with open(input) as stream:
@@ -753,7 +756,7 @@ class GraphbrainExtractor(Extractor):
                     # Step 1: add gold_dict to gold_list for last sentence (but skip the very first)
                     if total > 1:
                         # combine arg3-arg6 to "arg3+"
-                        keys_to_combine = ["arg3", "arg4", "arg5", "arg6"]
+                        keys_to_combine = ["arg3", "arg4", "arg5", "arg6", "arg7"]
                         tuples_list = []
                         for tup in gold_dict["tuples"]:
                             arg3to6 = []
@@ -772,6 +775,7 @@ class GraphbrainExtractor(Extractor):
                         # Add to the list under a new key
                         gold_dict["tuples"] = tuples_list
                         gold_list.append(gold_dict)
+
                         logging.info("--------- Gold tuples ---------")
                         for tup in gold_dict["tuples"]:
                             for key in tup:
@@ -795,56 +799,54 @@ class GraphbrainExtractor(Extractor):
                     # Step 3: text parsing for new sentence (only if needed)
                     text_to_graph = self.get_graphs(sentence)
                     # TODO: how to handle skipped cases
-                    # possible solution: skip gold data creation as well (not implemented yet)
                     if len(text_to_graph) > 1:
                         logging.error(f"sentence split into two: {words}")
-                        logging.error(f"{text_to_graph=}")
+                        logging.error(f"{sen_idx=}, {text_to_graph=}")
                         logging.error("skipping")
                         skipped += 1
                         skip = True
                         logging.error(f"{skipped=}, {total=}")
 
-                    # TODO: investigate why this try/except is needed
-                    try:
-                        graph = text_to_graph[sentence]["main_edge"]
-                    except:
-                        logging.error(f"{text_to_graph=}")
-                        logging.error("skipping")
-                        skipped += 1
-                        skip = True
-                        logging.error(f"{skipped=}, {total=}")
-                    logging.debug(f"{sentence=}, {graph=}")
+                    logging.debug(f"{sentence=}, {text_to_graph=}")
 
-                    # TODO: check if 'if graph' is necessary
                     # Step 4: generating triplets after conjunction decomposition (information_extraction)
-                    if graph and not skip:
-                        atom2word = text_to_graph[sentence]["atom2word"]
-                        logging.info("-" * 100)
-                        logging.info(f"START of information extraction for {sen_idx=}:")
-                        logging.info(f"{sentence=}")
-                        logging.info(f"{graph=}")
-                        # logging.info(f"{atom2word=}")
-                        information_extraction(  # in oie_patterns.py
-                            extractions, graph, sen_idx, atom2word, self.patterns
-                        )
+                    if not skip:
+                        try:
+                            # rare problems with sentence modifications need this check
+                            graph = text_to_graph[sentence]["main_edge"]
+                        except KeyError:
+                            logging.error(f"sentence not found after parsing")
+                            logging.error(f"{sen_idx=}, {sentence=}")
+                            logging.error("skipping")
+                            skipped += 1
+                            logging.error(f"{skipped=}, {total=}")
+                        else:
+                            atom2word = text_to_graph[sentence]["atom2word"]
+                            logging.info("-" * 100)
+                            logging.info(
+                                f"START of information extraction for {sen_idx=}:"
+                            )
+                            logging.info(f"{sentence=}")
+                            logging.info(f"{graph=}")
+                            information_extraction(
+                                extractions, graph, sen_idx, atom2word, self.patterns
+                            )
 
                 # Step 5: gold data creation
                 # add multiple triplets to gold_dict for one sentence
                 temp = {k: defaultdict(list) for k in name_mapping.keys()}
                 for i, tok in enumerate(sen):
-                    # 'text': '(The second)/(The second danger to a year of relatively healthy global economic growth)',
-                    # 'words': ['The', 'second'],
-                    # 'words_indexes': [0, 1],
                     label = tok[7].split("-")[0]
                     if label == "O":
                         continue
                     temp[label]["words"].append(tok[1])
                     temp[label]["words_indexes"].append(i)
 
-                # TODO: add "text" entry with joining "words" list to string
-                # for key in temp.keys():
-                #     joined_text = " ".join(temp[key]["words"])
-                #     temp[key]["text"] = joined_text
+                # check if annotation misses objects (A1 and higher)
+                if not temp["A1"]:
+                    logging.debug(f"skipping gold triplet without arg1+")
+                    logging.debug(f"{temp=}")
+                    continue
 
                 args_dict = {
                     name_mapping.get(key, key): value
@@ -855,9 +857,6 @@ class GraphbrainExtractor(Extractor):
 
                 gold_dict["tuples"].append(args_dict)
 
-            logging.info(
-                f"{skipped/sent_cnt:.2%} of annotated sentences skipped (parsing problems)"
-            )
             # save gold dictionary to json file
             save_dict = {input: gold_list}
             output = input.split(".")[0] + "_gold.json"
