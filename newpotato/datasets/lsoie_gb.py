@@ -1,5 +1,14 @@
 import argparse
 import logging
+
+logging.basicConfig(
+    format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),  # To print logs to the console
+        logging.FileHandler("logs_mapping.log", mode="w"),  # To save logs to a file
+    ],
+)
+
 from collections import defaultdict
 
 import networkx as nx
@@ -29,14 +38,17 @@ def load_and_map_lsoie(input_file, extractor):
                 logging.error(f"{skipped=}, {total=}")
                 continue
 
+            # rare problems with sentence modifications need this check
             try:
                 graph = text_to_graph[sentence]["main_edge"]
             except:
-                logging.error(f"{text_to_graph=}")
+                logging.error(f"sentence not found after parsing")
+                logging.error(f"{sen_idx=}, {sentence=}")
                 logging.error("skipping")
                 skipped += 1
+                logging.error(f"{skipped=}, {total=}")
                 continue
-            logging.debug(f"{sentence=}, {graph=}")
+            logging.debug(f"{sen_idx=},{sentence=}, {graph=}")
 
             arg_dict = defaultdict(list)
             pred = []
@@ -60,7 +72,7 @@ def load_and_map_lsoie(input_file, extractor):
 
             triplet = Triplet(pred, args, toks=words)
             try:
-                mapped_triplet = extractor.map_triplet(triplet, sentence, strict=False)
+                mapped_triplet = extractor.map_triplet(triplet, sentence, strict=True)
                 # mapped_triplet is of class newpotato.extractors.graphbrain_extractor_PC.GraphbrainMappedTriplet
                 # mapped_triplet has ".variables" attribute
             except (KeyError, nx.exception.NetworkXPointlessConcept):
@@ -70,6 +82,14 @@ def load_and_map_lsoie(input_file, extractor):
                 logging.error(f"{skipped=}, {total=}")
                 continue
 
+            if not mapped_triplet:
+                logging.error(f"error mapping triplet: {triplet=}, {words=}")
+                logging.error("skipping")
+                skipped += 1
+                logging.error(f"{skipped=}, {total=}")
+                continue
+
+            logging.debug(f"{mapped_triplet.variables=}")
             yield sentence, mapped_triplet
 
             # mapped_triplet.variables:
@@ -96,11 +116,12 @@ def get_args():
 
 def main():
     args = get_args()
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-        force=True,
-    )
+    # logging.basicConfig(
+    #     level=logging.WARNING,
+    #     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
+    #     force=True,
+    # )
+    logging.getLogger().setLevel(logging.WARNING)
     if args.verbose:
         logging.getLogger().setLevel(logging.INFO)
     if args.debug:
