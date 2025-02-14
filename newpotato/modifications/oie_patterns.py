@@ -6,7 +6,7 @@ from graphbrain.hyperedge import hedge
 from graphbrain.utils.conjunctions import conjunctions_decomposition
 from rapidfuzz import process
 
-from newpotato.modifications.patterns import _matches_atomic_pattern, match_pattern
+from newpotato.modifications.patterns import match_pattern
 
 
 # copied from: https://stackoverflow.com/questions/71732405/splitting-words-by-whitespace-without-affecting-brackets-content-using-regex
@@ -217,6 +217,12 @@ def edge_text(atom2word, edge):
 
 
 def label(edge, atom2word):
+    if type(edge) == list:
+        final_result = []
+        for e in edge:
+            final_result.append(edge_text(atom2word, e))
+        return " ".join(final_result)
+
     return edge_text(atom2word, edge)
 
 
@@ -264,31 +270,33 @@ def add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3):
                     logging.info(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
 
 
-def find_tuples(extractions, edge, sent_id, atom2word, patterns):
-    logging.info(f"{sent_id=}, {edge=}")
+def find_tuples(extractions, edge, sent_id, atom2word, patterns, max_extr):
+    logging.debug(f"{edge=}")
+    extr_cnt = 0
     for pattern in patterns:
-        atoms = hedge(pattern).atoms()
+        pattern = hedge(pattern)
+        # TODO: remove next line
+        # pattern = pattern.simplify(subtypes=False, argroles=False, namespaces=True)
+        atoms = pattern.atoms()
         roots = {atom.root() for atom in atoms if atom.root() != "*"}
         # skip patterns with only two variables e.g. (REL/P.{p} ARG0/C)
         if len(roots) < 3:
-            # print("skipped")
             continue
         for match in match_pattern(edge, pattern):
-            # logging.debug(f"{pattern=}, {match=}")
+            logging.debug(f"{pattern=}")
+            logging.debug(f"{match=}")
+            # stop extracting triplets after certain number of extractions
+            if extr_cnt == max_extr:
+                return
             # skip missing/incomplete matches
-            if match == {} or len(match) != len(roots):
-                # print("skipped")
+            elif not match or len(match) != len(roots):
                 continue
 
             # attention: arg1 = ARG0; arg2 = ARG1
-            # TODO: handle patterns without arg2 (=ARG1)
             arg1 = label(match["ARG0"], atom2word)
             arg2 = label(match["ARG1"], atom2word)
             # relation cannot be splitted (REL1/REL2)
             rel = label(match["REL"], atom2word)
-
-            if len(rel) == 0:
-                logging.info(f"{match['REL']=}, {atom2word=}")
 
             if "ARG2" in match.keys():
                 arg3 = [label(match["ARG2"], atom2word)]
@@ -300,11 +308,13 @@ def find_tuples(extractions, edge, sent_id, atom2word, patterns):
             if "ARG3" in match.keys():
                 arg3.append(label(match["ARG3"], atom2word))
 
+            extr_cnt += 1
             add_to_extractions(extractions, sent_id, arg1, rel, arg2, arg3)
 
 
-def information_extraction(extractions, main_edge, sent_id, atom2word, patterns):
-    # logging.info(f"{sent_id=}, {main_edge=}")
+def information_extraction(
+    extractions, main_edge, sent_id, atom2word, patterns, max_extr
+):
     if main_edge.is_atom():
         return
     if main_edge.type()[0] == "R":
@@ -313,11 +323,18 @@ def information_extraction(extractions, main_edge, sent_id, atom2word, patterns)
             for edge in edges:
                 logging.debug(f"find_tuples() for {main_conjunction(edge)=}")
                 find_tuples(
-                    extractions, main_conjunction(edge), sent_id, atom2word, patterns
+                    extractions,
+                    main_conjunction(edge),
+                    sent_id,
+                    atom2word,
+                    patterns,
+                    max_extr,
                 )
         except IndexError:
             logging.error(
                 f"Issue with conjunction decomposition for one of the subedges of {main_edge=}"
             )
     for edge in main_edge:
-        information_extraction(extractions, edge, sent_id, atom2word, patterns)
+        information_extraction(
+            extractions, edge, sent_id, atom2word, patterns, max_extr
+        )
