@@ -2,9 +2,7 @@ import json
 import random
 from collections import Counter
 
-import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-import numpy as np
 
 # Load JSON file
 json_file = "evaluation_results.json"
@@ -13,11 +11,24 @@ with open(json_file, "r") as f:
 
 category = "total"  # Choose which precision-recall values to plot ("total", "matches_only", "exact_match")
 
-# Fixed color palette for extractions (black, dark blue, dark gray, dark green, red)
-extraction_colors = ["#000000", "#0b3d91", "#808080", "#1a4d2e", "#e41a1c"]
-
-# Generate distinguishable colors for patterns
-pattern_colors = plt.get_cmap("tab20")(np.linspace(0, 1, 20))
+# Define a fixed set of distinguishable colors (extendable if needed)
+distinct_colors = [
+    "#1f77b4",
+    "#ff7f0e",
+    "#2ca02c",
+    "#d62728",
+    "#9467bd",
+    "#8c564b",
+    "#e377c2",
+    "#7f7f7f",
+    "#bcbd22",
+    "#17becf",
+    "#aec7e8",
+    "#ffbb78",
+    "#98df8a",
+    "#ff9896",
+    "#c5b0d5",
+]
 
 jitter_strength = 0.001
 
@@ -25,7 +36,7 @@ jitter_strength = 0.001
 min_precision, max_precision = float("inf"), float("-inf")
 min_recall, max_recall = float("inf"), float("-inf")
 
-# find global min/max across all evaluations
+# Find global min/max across all evaluations
 for evaluations in data_dict.values():
     for eval_data in evaluations:
         results = eval_data["results"]["shg"].get(category, {})
@@ -35,8 +46,8 @@ for evaluations in data_dict.values():
             min_recall = min(min_recall, results["recall"])
             max_recall = max(max_recall, results["recall"])
 
-# expand range slightly for better visualization
-padding = 0.05
+# Optional: Expand range slightly for better visualization
+padding = 0.05  # 5% padding
 precision_range = max_precision - min_precision
 recall_range = max_recall - min_recall
 
@@ -45,59 +56,29 @@ max_precision += precision_range * padding
 min_recall -= recall_range * padding
 max_recall += recall_range * padding
 
-# collect unique pattern and extraction values
-unique_patterns = sorted(
-    set(
-        eval_data["nr_of_patterns"]
-        for evaluations in data_dict.values()
-        for eval_data in evaluations
-    )
-)
-unique_extractions = sorted(
-    set(
-        eval_data["max_nr_of_extractions"]
-        for evaluations in data_dict.values()
-        for eval_data in evaluations
-    )
-)
-
-# create color maps
-pattern_cmap = mcolors.ListedColormap(pattern_colors[: len(unique_patterns)])
-extraction_cmap = mcolors.ListedColormap(extraction_colors[: len(unique_extractions)])
-
-# explicitly setting boundaries
-pattern_norm = mcolors.BoundaryNorm(
-    unique_patterns + [max(unique_patterns) + 5], pattern_cmap.N
-)
-extraction_norm = mcolors.BoundaryNorm(
-    unique_extractions + [max(unique_extractions) + 1], extraction_cmap.N
-)
-
-# create mapping
-pattern_to_color = {
-    pattern: pattern_colors[i] for i, pattern in enumerate(unique_patterns)
-}
-extraction_to_color = {
-    extraction: extraction_colors[i] for i, extraction in enumerate(unique_extractions)
-}
 
 for input_file, evaluations in data_dict.items():
     if not evaluations:
         print(f"Skipping {input_file}: No data available.")
         continue
 
-    # Sort configurations by patterns ↓, then extractions ↓
+    # **Sort configurations**: first by nr_of_patterns ↓, then by max_nr_of_extractions ↓
     evaluations.sort(key=lambda x: (-x["nr_of_patterns"], -x["max_nr_of_extractions"]))
 
-    # Create figure
+    # Create figure for each input file
     plt.figure(figsize=(8, 6))
 
     precision_values = []
     recall_values = []
     f1_scores = []
+    labels = []
     remarks = []
+    color_map = (
+        {}
+    )  # Mapping each (nr_of_patterns, max_nr_of_extractions) to a unique color
+    handles = []  # For the legend
 
-    # Count occurrences of (precision, recall) pairs for jittering
+    # Count occurrences of (precision, recall) pairs
     value_counts = Counter(
         (res["precision"], res["recall"])
         for eval_data in evaluations
@@ -113,6 +94,12 @@ for input_file, evaluations in data_dict.items():
         if "precision" not in results or "recall" not in results:
             continue
 
+        config = (eval_data["nr_of_patterns"], eval_data["max_nr_of_extractions"])
+
+        # Assign a unique color per configuration
+        if config not in color_map:
+            color_map[config] = distinct_colors[len(color_map) % len(distinct_colors)]
+
         precision, recall = results["precision"], results["recall"]
 
         # Calculate F1 score
@@ -125,37 +112,40 @@ for input_file, evaluations in data_dict.items():
                 best_f1 = f1_score
                 best_f1_point = (recall, precision)
 
-        # Apply jitter if necessary
+        # Apply jitter only if the same (precision, recall) pair appears more than once
         if value_counts[(precision, recall)] > 1:
             precision += random.uniform(-jitter_strength, jitter_strength)
             recall += random.uniform(-jitter_strength, jitter_strength)
             best_f1_point = (recall, precision)
 
-        # Get pattern and extraction configuration
-        num_patterns = eval_data["nr_of_patterns"]
-        num_extractions = eval_data["max_nr_of_extractions"]
-
         precision_values.append(precision)
         recall_values.append(recall)
-
-        # Plot the point with face and edge color
-        plt.scatter(
-            recall,
-            precision,
-            s=80,
-            c=[pattern_to_color[num_patterns]],
-            edgecolors=[extraction_to_color[num_extractions]],
-            linewidths=1.5,
-            alpha=0.8,
-        )
+        labels.append(f"{config[0]} patterns, {config[1]} extractions")
 
         # Store remark if available
         if "remark" in eval_data:
-            remarks.append((precision, recall, eval_data["remark"]))
+            remarks.append(
+                (results["precision"], results["recall"], eval_data["remark"])
+            )
 
     if not precision_values:
         print(f"Skipping {input_file}: No valid precision-recall data.")
         continue
+
+    # Scatter plot with distinct colors per configuration
+    for i in range(len(precision_values)):
+        plt.scatter(
+            recall_values[i],
+            precision_values[i],
+            color=color_map[
+                (
+                    evaluations[i]["nr_of_patterns"],
+                    evaluations[i]["max_nr_of_extractions"],
+                )
+            ],
+            label=labels[i] if labels[i] not in labels[:i] else "",
+            alpha=0.7,
+        )
 
     # highlight best f1 point
     if best_f1_point:
@@ -176,33 +166,33 @@ for input_file, evaluations in data_dict.items():
     for py, rx, remark in remarks:
         plt.text(rx, py, remark, fontsize=9, color="black", alpha=0.75, ha="right")
 
-    # labels and title
+    # Labels and title
+    # plt.xlim(min_recall, max_recall)
+    # plt.ylim(min_precision, max_precision)
     plt.xlabel("Recall")
     plt.ylabel("Precision")
     plt.title(f"Precision-Recall Plot: {input_file}")
 
-    # colorbar for patterns
-    # boundaries = np.arange(min(unique_patterns) - 0.5, max(unique_patterns) + 1.5, 1)
-    boundaries = np.arange(min(unique_patterns) - 1, max(unique_patterns) + 6, 5)
-    tick_positions = boundaries[:-1] + 2.5
-    cb1 = plt.colorbar(
-        plt.cm.ScalarMappable(norm=pattern_norm, cmap=pattern_cmap),
-        ax=plt.gca(),
-        ticks=tick_positions,
-    )
-    cb1.set_ticklabels(unique_patterns)
-    cb1.set_label("number of patterns")
-
-    # colorbar for extractions
-    boundaries = np.arange(min(unique_extractions) - 1, max(unique_extractions) + 2, 1)
-    tick_positions = boundaries[1:-1] + 0.5
-    cb2 = plt.colorbar(
-        plt.cm.ScalarMappable(norm=extraction_norm, cmap=extraction_cmap),
-        ax=plt.gca(),
-        ticks=tick_positions,
-    )
-    cb2.set_ticklabels(unique_extractions)
-    cb2.set_label("max. number of extractions")
+    # sorted legend
+    sorted_configs = sorted(
+        color_map.keys(), key=lambda x: (-x[0], -x[1])
+    )  # Sort: patterns ↓, extractions ↓
+    handles = [
+        plt.Line2D(
+            [0],
+            [0],
+            marker="o",
+            color="w",
+            markerfacecolor=color_map[config],
+            markersize=8,
+        )
+        for config in sorted_configs
+    ]
+    legend_labels = [
+        f"{config[0]} patterns, max. {config[1]} extraction(s)"
+        for config in sorted_configs
+    ]
+    plt.legend(handles, legend_labels, title="Configurations", loc="lower right")
 
     # Save plot
     filename = f"prec_rec_{input_file.split('.')[0]}.png"
