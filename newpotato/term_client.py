@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import os
 
 logging.basicConfig(
     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
@@ -14,7 +15,7 @@ from rich.console import Console
 from rich.table import Table
 from tqdm import tqdm
 
-from newpotato.evaluate.eval_hitl import HITLEvaluator
+# from newpotato.evaluate.eval_hitl import HITLEvaluator
 from newpotato.evaluate.wire_functions import *
 from newpotato.hitl_marina import HITLManager
 
@@ -168,23 +169,52 @@ class NPTerminalClient:
         console.print(
             "[bold cyan]gold data creation and inferring triplets[/bold cyan]"
         )
+
+        # set max_extr interactively
+        console.print(
+            "[bold cyan]Enter a maximum number of extractions per hyperedge:[/bold cyan]"
+        )
+        max_extr = input("> ")
+        if not max_extr.isdigit() or int(max_extr) < 1:
+            console.print("[bold red]Please enter an integer > 0![/bold red]")
+            return
+
         if data:
-            # data = "lsoie_wiki_dev.conll"
-            self.hitl.extractor.temporary_triplets_creation(
-                input=data, max_items=1000000
+            raw_rate, evaluated_rate, avg_latency = (
+                self.hitl.extractor.generate_triplets_and_gold_data(
+                    input=data, max_extr=int(max_extr)
+                )
             )
         else:
             console.print("[bold cyan]Enter path to test data:[/bold cyan]")
             data = input("> ")
 
             try:
-                self.hitl.extractor.temporary_triplets_creation(
-                    input=data, max_items=1000000
+                raw_rate, evaluated_rate, avg_latency = (
+                    self.hitl.extractor.generate_triplets_and_gold_data(
+                        input=data, max_extr=int(max_extr)
+                    )
                 )
             except FileNotFoundError:
                 console.print(f"[bold red]No such file or directory: {data}[/bold red]")
             else:
                 return
+
+        console.print(f"Raw triplets per second: {raw_rate:.2f}")
+        console.print(f"Evaluated triplets per second: {evaluated_rate:.2f}")
+        console.print(f"Average latency per sentence: {avg_latency:.6f} seconds")
+
+        # TODO: name of output file as argument
+        # load json file with results if it exists
+        json_file = "evaluation_results.json"
+        if os.path.exists(json_file):
+            with open(json_file, "r") as f:
+                try:
+                    results_dict = json.load(f)
+                except json.JSONDecodeError:
+                    results_dict = {}
+        else:
+            results_dict = {}
 
         # evaluate triplets with WiRe57 scorer
         console.print("[bold cyan]evaluation with wire scorer[/bold cyan]")
@@ -194,20 +224,20 @@ class NPTerminalClient:
         # gold_data = dict of documents, each doc a list of sents with a "tuples" attribute,
         # which is the list of reference tuples
         gold = {s["id"]: s["tuples"] for doc in reference.values() for s in doc}
-        # TODO: remove ids from gold without prediction ?
         all_predictions = json.load(open(pred_data))
         predictions_by_OIE = split_tuples_by_extractor(gold.keys(), all_predictions)
         systems = predictions_by_OIE.keys()
         reports = {}
+        result_per_system = {}
 
         for e in systems:
             report = ""
             logging.info(f"Evaluating {e} system ...")
             metrics, raw_match_scores = eval_system(gold, predictions_by_OIE[e])
-            with open("raw_scores/" + e + "_prec_scores.dat", "w") as f:
-                f.write(str(raw_match_scores[0]))
-            with open("raw_scores/" + e + "_rec_scores.dat", "w") as f:
-                f.write(str(raw_match_scores[1]))
+            # with open("raw_scores/" + e + "_prec_scores.dat", "w") as f:
+            #     f.write(str(raw_match_scores[0]))
+            # with open("raw_scores/" + e + "_rec_scores.dat", "w") as f:
+            #     f.write(str(raw_match_scores[1]))
             prec, rec = metrics["precision"], metrics["recall"]
             f1_score = f1(prec, rec)
             exactmatch_prec = (
@@ -226,10 +256,7 @@ class NPTerminalClient:
                 e,
                 metrics["precision_of_matches"],
                 metrics["recall_of_matches"],
-                # metrics["non-matches"],
-                metrics[
-                    "matches"
-                ],  # this seems to be incorrect -> 'non-matches' required?
+                metrics["matches"],
             )
             report += "\n{} were exactly correct, out of {} predicted / the reference {}.".format(
                 metrics["exactmatches_precision"][0],
@@ -240,15 +267,51 @@ class NPTerminalClient:
                 exactmatch_prec, exactmatch_rec, f1(exactmatch_prec, exactmatch_rec)
             )
             reports[f1_score] = report
+            result_per_system[e] = {
+                "total": {"precision": prec, "recall": rec, "f1_score": f1_score},
+                "matches_only": {
+                    "precision": metrics["precision_of_matches"],
+                    "recall": metrics["recall_of_matches"],
+                    "nr_of_matches": metrics["matches"],
+                },
+                "exact_match": {
+                    "correct": metrics["exactmatches_precision"][0],
+                    "predicted": metrics["exactmatches_precision"][1],
+                    "reference": metrics["exactmatches_recall"][1],
+                    "precision": exactmatch_prec,
+                    "recall": exactmatch_rec,
+                    "f1_score": f1(exactmatch_prec, exactmatch_rec),
+                },
+            }
         sorted_reports = [a[1] for a in sorted(reports.items(), reverse=True)]
         print("\n" + "\n\n".join(sorted_reports))
 
-        # evaluator = HITLEvaluator(self.hitl)
-        # results = evaluator.get_results()
-        # for key, value in results.items():
-        #     console.print(f"{key}: {value}")
-        # if fn:
-        #     evaluator.write_events_to_file(fn)
+        console.print("[bold cyan]Enter remark for documentation:[/bold cyan]")
+        remark = input("> ")
+
+        results = {
+            "nr_of_patterns": len(self.hitl.extractor.patterns),
+            "max_nr_of_extractions": int(max_extr),
+            "results": result_per_system,
+            "remark": remark,
+            "raw_rate": raw_rate,
+            "evaluated_rate": evaluated_rate,
+            "avg_latency": avg_latency,
+        }
+
+        # Append to existing key or create a new list
+        if data in results_dict:
+            results_dict[data].append(results)
+        else:
+            results_dict[data] = [results]
+
+        # Save the updated data back to the file
+        with open(json_file, "w") as f:
+            json.dump(results_dict, f, indent=4)
+
+        print(
+            f"Saved new results for '{data}'. Total evaluations stored: {len(results_dict[data])}"
+        )
 
     def print_graphs(self):
         table = Table(show_header=True, header_style="bold magenta")
@@ -312,38 +375,6 @@ class NPTerminalClient:
                 else:
                     get_triplets_from_user(sen, self.hitl, console)
 
-    def run_oie(self):
-        # get status data
-        status = self.hitl.get_status()
-        total_cnt = status["n_annotated"]
-
-        # # unsupervised rule learning
-        # top_n = 50
-        # pc = self.hitl.generalise_graph(top_n, method="unsupervised")
-        # print(pc)
-        # top_patterns = pc.most_common(top_n)
-
-        # # get simplified patterns
-        # simple_patterns, total_cnt = simplify_patterns(top_patterns, strict=False)
-        # print(simple_patterns)
-        # print("Total count: ", total_cnt)
-
-        # open saved oie patterns file
-        # f = open("p_train.txt", "r")
-        # patterns = f.read()
-
-        # # supervised rule learning
-        # top_n = 20
-        # pc = self.hitl.generalise_graph(method="supervised", check_vars=True)
-        # patterns = [key for key, _ in pc.most_common(top_n)]
-        # print(patterns)
-
-        # pattern_cnt = sum(pc.values())
-        # print(f"{pattern_cnt=}")
-        # print(
-        #     f"{pattern_cnt/total_cnt:.2%} of annotated sentences have a pattern"
-        # )  # not exactly because of multiple patterns per sentence
-
     def _run(self):
         while True:
             self.print_status()
@@ -380,9 +411,6 @@ class NPTerminalClient:
             elif choice == "Q":
                 console.print("[bold red]Exiting...[/bold red]")
                 break
-            # TODO: remove this and update help info
-            elif choice == "O":
-                self.run_oie()
             elif choice == "H":
                 console.print(
                     "[bold cyan]Help:[/bold cyan]\n"
@@ -399,7 +427,6 @@ class NPTerminalClient:
                     + "\t(C)lear: Clear the console\n"
                     + "\t(Q)uit: Exit the program\n"
                     + "\t(H)elp: Show this help message\n"
-                    + "\t(O)pen Information Extraction: Transform hyperedges into abstract patterns\n"
                 )
 
             else:
@@ -432,20 +459,18 @@ class NPTerminalClient:
             console.print(
                 f"[cyan]loading extractor patterns from {args.load_patterns}[/cyan]"
             )
-            self.hitl.extractor.load_patterns(args.load_patterns)
+            self.hitl.extractor.load_patterns(fn=args.load_patterns, N=args.rules_cnt)
 
         if args.upload_text:
             console.print(f"[cyan]loading text from {args.upload_text}[/cyan]")
             self._upload_file(args.upload_text)
 
         if args.get_rules:
-            console.print("[bold cyan]getting rules[/bold cyan]")
-            if args.rules_cnt:
-                self.print_rules(args.rules_cnt)
-            else:
-                self.print_rules()
+            console.print("[cyan]getting rules[/cyan]")
+            self.print_rules(args.rules_cnt)
 
         if args.evaluate:
+            console.print("[cyan]starting evaluation[/cyan]")
             self.evaluate(args.evaluate)
 
         if args.save_patterns:
