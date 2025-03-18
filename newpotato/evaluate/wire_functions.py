@@ -1,3 +1,11 @@
+# functions from wirer_scorer.py
+# https://github.com/rali-udem/WiRe57/blob/master/code/wire_scorer.py
+
+# TODO:
+# - Implement half points for part-misplaced words.
+# - Deal with prepositions possibly being the first token of an arg, especially for arg2.
+#   > It's fully ok for "any" prep to be last word of ref_rel or first_word of pred_arg
+
 import logging
 
 # Create a logger for this module
@@ -10,11 +18,9 @@ def eval_system(gold, predictions):
     # then gather the scores across sentences and compute the weighted-average
     for s, reference_tuples in gold.items():
         predicted_tuples = predictions.get(s, [])
-        if not reference_tuples:
-            logger.info(f"Skipping sentence {s} - no valid gold tuples")
-            continue
-        logger.info(f"Matching sentence {s}")
+        logger.info(f"### sen_idx={s} ###")
         results[s] = sentence_match(reference_tuples, predicted_tuples)
+        logger.debug(f"{results[s]=}")
         # returns dict with
         # 'precision': [1.0, 8], 'recall': [0.6, 4],
         # 'precision_of_matches': [1.0], 'recall_of_matches': [0.6],
@@ -36,6 +42,10 @@ def eval_system(gold, predictions):
         exactmatches_recdenom += s["exact_match_recall"][1]
         tot_prec_of_matches += sum(s["precision_of_matches"])
         tot_rec_of_matches += sum(s["recall_of_matches"])
+    if prec_denom != exactmatches_precdenom:
+        logger.debug(f"{prec_denom=}, {exactmatches_precdenom=}")
+    if rec_denom != exactmatches_recdenom:
+        logger.debug(f"{rec_denom=}, {exactmatches_recdenom=}")
     precision_scores = [v for s in results.values() for v in s["precision_of_matches"]]
     recall_scores = [v for s in results.values() for v in s["recall_of_matches"]]
     raw_match_scores = [precision_scores, recall_scores]
@@ -51,16 +61,6 @@ def eval_system(gold, predictions):
         "exactmatches_recall": [exactmatches_recnum, exactmatches_recdenom],
     }
     return metrics, raw_match_scores
-
-
-# TODO:
-# - Implement half points for part-misplaced words.
-# - Deal with prepositions possibly being the first token of an arg, especially for arg2.
-#   > It's fully ok for "any" prep to be last word of ref_rel or first_word of pred_arg
-
-
-def avg(l):
-    return sum(l) / len(l)
 
 
 def f1(prec, rec):
@@ -87,19 +87,22 @@ def sentence_match(gold, predicted):
                     logger.info("arg3+:")
                     for arg in gt["arg3+"]:
                         logger.info(f"    - {' '.join(arg['words'])}")
-                else:
+                elif key in ["arg1", "rel", "arg2"]:
                     logger.info(f"{key}: {' '.join(gt[key]['words'])}")
 
             logger.info(f"with predicted tuple:")
             for key, value in pt.items():
                 if key == "arg3+":
+                    logger.info("arg3+:")
                     for arg in value:
-                        logger.info(f"{key}: {arg}")
+                        logger.info(f"    - {arg}")
                 elif key in ["arg1", "rel", "arg2"]:
                     logger.info(f"{key}: {value}")
             logger.info("-" * 30)
             logger.info(f"exact match score: {exact_match_scores[i][j]}")
             logger.info(f"partial match score: {scores[i][j]}")
+            if scores[i][j]:
+                logger.info(f"partial match score: {scores[i][j]}")
             logger.info("-" * 30)
 
     # logger.info(f"exact match scores: {exact_match_scores}")
@@ -111,30 +114,33 @@ def sentence_match(gold, predicted):
     return scoring_metrics
 
 
-def str_list(thing):
-    return "\n".join([str(s) for s in thing])
-
-
 def aggregate_scores_greedily(scores):
     # Greedy match: pick the prediction/gold match with the best f1 and exclude
     # them both, until nothing left matches. Each input square is a [prec, rec]
     # pair. Returns precision and recall as score-and-denominator pairs.
     matches = []
+    logger.debug(f"{scores=}")
     while True:
         max_s = 0
         gold, pred = None, None
         for i, gold_ss in enumerate(scores):
+            logger.debug(f"{i=}, {gold_ss=}")
             if i in [m[0] for m in matches]:
+                logger.debug(f"row already taken")
                 # Those are already taken rows
                 continue
             for j, pred_s in enumerate(scores[i]):
+                logger.debug(f"{j=}, {pred_s=}")
                 if j in [m[1] for m in matches]:
+                    logger.debug(f"col already taken")
                     # Those are used columns
                     continue
                 if pred_s and f1(*pred_s) > max_s:
                     max_s = f1(*pred_s)
                     gold = i
                     pred = j
+                    logger.debug(f"new best score: {max_s}")
+                    logger.debug(f"best gold: {i}, best pred: {j}")
         if max_s == 0:
             break
         # save indices of best match for this sentence e.g. [[2, 4]]
@@ -154,7 +160,7 @@ def aggregate_scores_greedily(scores):
 
 
 def aggregate_exact_matches(match_matrix):
-    # For this agregation task, no predicted tuple can exact-match two gold
+    # For this aggregation task, no predicted tuple can exact-match two gold
     # ones, so it's easy, look at lines and columns looking for OR-total booleans.
     recall = [
         sum([any(gold_matches) for gold_matches in match_matrix], 0),
@@ -177,23 +183,6 @@ def aggregate_exact_matches(match_matrix):
     # f1 = 2 * precision * recall / (precision + recall)
     metrics = {"precision": precision, "recall": recall}
     return metrics
-
-
-def part_to_string(p):
-    return " ".join(p["words"])
-
-
-def gold_to_text(gt):
-    text = " ; ".join(
-        [
-            part_to_string(gt["arg1"]),
-            part_to_string(gt["rel"]),
-            part_to_string(gt["arg2"]),
-        ]
-    )
-    if gt["arg3+"]:
-        text += " ; " + " ; ".join(gt["arg3+"])
-    return text
 
 
 def tuple_exact_match(t, gt):
@@ -242,12 +231,18 @@ def tuple_match(t, gt):
     recall = [0, 0]  # 0 out of 0 reference words match
     # If, for each part, any word is the same as a reference word, then it's a match.
     for part in ["arg1", "rel", "arg2"]:
+        logger.debug(f"{part=}")
         predicted_words = t[part].split()
         gold_words = gt[part]["words"]
         gold_indexes = gt[part]["words_indexes"]
         gold_num_realwords = sum([i != "inf" for i in gold_indexes], 0)
+        logger.info(f"{gold_num_realwords=}")
         gold_is_fully_inferred = all([i == "inf" for i in gold_indexes])
+        # added this info
+        if gold_is_fully_inferred:
+            logger.info("Gold tuple is fully inferred!")
         if not predicted_words:
+            logger.info("No prediction available!")
             if gold_words and not gold_is_fully_inferred:
                 return False
             else:
@@ -255,6 +250,7 @@ def tuple_match(t, gt):
         matching_words = sum(1 for w in predicted_words if w in gold_words)
         if matching_words == 0 and not gold_is_fully_inferred:
             return False  # t <-> gt is not a match
+        logger.info(f"{part}: {matching_words} matching words")
         precision[0] += matching_words
         precision[1] += len(predicted_words)
         # Currently this slightly penalises systems when the reference
@@ -274,6 +270,7 @@ def tuple_match(t, gt):
             recall[1] += gold_num_realwords
             # if gt has more arg3+ elements than t -> next if is passed
             # but number of reference words is updated for recall!
+            # checks the number of entries in the arg3+ list for the predicted tuple
             if t.get("arg3+", False) and len(t["arg3+"]) > i:
                 predicted_words = t["arg3+"][i].split()
                 matching_words = sum(1 for w in predicted_words if w in gold_words)
@@ -303,3 +300,27 @@ def split_tuples_by_extractor(gold, tuples):
             else:
                 predictions_by_OIE[t["extractor"]][s] = [t]
     return predictions_by_OIE
+
+
+## additional functions from wirer_scorer.py
+# def avg(l):
+#     return sum(l) / len(l)
+
+# def str_list(thing):
+#     return "\n".join([str(s) for s in thing])
+
+# def part_to_string(p):
+#     return " ".join(p["words"])
+
+
+# def gold_to_text(gt):
+#     text = " ; ".join(
+#         [
+#             part_to_string(gt["arg1"]),
+#             part_to_string(gt["rel"]),
+#             part_to_string(gt["arg2"]),
+#         ]
+#     )
+#     if gt["arg3+"]:
+#         text += " ; " + " ; ".join(gt["arg3+"])
+#     return text
