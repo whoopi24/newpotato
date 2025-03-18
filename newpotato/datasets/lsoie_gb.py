@@ -1,5 +1,6 @@
 import argparse
 import logging
+import time
 
 logging.basicConfig(
     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
@@ -25,15 +26,22 @@ console = Console()
 def load_and_map_lsoie(input_file, extractor):
     with open(input_file) as stream:
         total, skipped = 0, 0
+        sent_cnt = 0
+        last_sent = ""
         for sen_idx, sen in tqdm(enumerate(gen_tsv_sens(stream))):
             total += 1
             words = [t[1] for t in sen]
             sentence = " ".join(words)
             text_to_graph = extractor.get_graphs(sentence)
+
+            # count sentences for statistics
+            if sentence != last_sent:
+                last_sent = sentence
+                sent_cnt += 1
             if len(text_to_graph) > 1:
                 logging.error(f"sentence split into two: {words}")
-                logging.error(f"{text_to_graph=}")
-                logging.error("skipping")
+                # logging.error(f"{text_to_graph=}")
+                logging.error("skipping sentence")
                 skipped += 1
                 logging.error(f"{skipped=}, {total=}")
                 continue
@@ -44,7 +52,7 @@ def load_and_map_lsoie(input_file, extractor):
             except:
                 logging.error(f"sentence not found after parsing")
                 logging.error(f"{sen_idx=}, {sentence=}")
-                logging.error("skipping")
+                logging.error("skipping sentence")
                 skipped += 1
                 logging.error(f"{skipped=}, {total=}")
                 continue
@@ -77,19 +85,20 @@ def load_and_map_lsoie(input_file, extractor):
                 # mapped_triplet has ".variables" attribute
             except (KeyError, nx.exception.NetworkXPointlessConcept):
                 logging.error(f"error mapping triplet: {triplet=}, {words=}")
-                logging.error("skipping")
+                logging.error("skipping triplet")
                 skipped += 1
                 logging.error(f"{skipped=}, {total=}")
                 continue
 
             if not mapped_triplet:
                 logging.error(f"error mapping triplet: {triplet=}, {words=}")
-                logging.error("skipping")
+                logging.error("skipping triplet")
                 skipped += 1
                 logging.error(f"{skipped=}, {total=}")
                 continue
 
             logging.debug(f"{mapped_triplet.variables=}")
+            print(f"Sentence count: {sent_cnt}")
             yield sentence, mapped_triplet
 
             # mapped_triplet.variables:
@@ -116,11 +125,6 @@ def get_args():
 
 def main():
     args = get_args()
-    # logging.basicConfig(
-    #     level=logging.WARNING,
-    #     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-    #     force=True,
-    # )
     logging.getLogger().setLevel(logging.WARNING)
     if args.verbose:
         logging.getLogger().setLevel(logging.INFO)
@@ -128,11 +132,14 @@ def main():
         logging.getLogger().setLevel(logging.DEBUG)
 
     console.print("initializing HITL session")
+    start = time.time()
     hitl = HITLManager(extractor_type="graphbrain")
     console.print(f"loading LSOIE data from {args.input_file}")
     load_lsoie_to_hitl(args.input_file, hitl)
     console.print(f"saving HITL session to {args.state_file}")
     hitl.save(args.state_file)
+    duration_min = (time.time() - start) / 60
+    print(f"Duration of parsing and mapping process: {duration_min:.2f} minutes")
 
 
 if __name__ == "__main__":
