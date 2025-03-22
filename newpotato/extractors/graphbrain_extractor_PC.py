@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import time
 from collections import Counter, defaultdict
@@ -648,181 +649,214 @@ class GraphbrainExtractor(Extractor):
             )
 
     def generate_triplets_and_gold_data(self, input, max_extr):
-        # create dictionary with correctly ordered and named keys
-        name_mapping = {
-            "A0": "arg1",
-            "P": "rel",
-            "A1": "arg2",
-            "A2": "arg3",
-            "A3": "arg4",
-            "A4": "arg5",
-            "A5": "arg6",
-            "A6": "arg7",
-        }
+        start_time = time.time()
+        goldfile = input.split(".")[0] + "_gold.json"
+        extractions = {}
+        latencies = []
+        # skip gold data creation if gold data already available (and no parsing errors can occur)
+        if os.path.exists(goldfile):
+            with open(goldfile, "r") as gfile:
+                gold = json.load(gfile)
 
-        with open(input) as stream:
-            total, skipped = 0, 0
-            last_sent = ""
-            sent_cnt = 0
-            rm_sen_idx = set()
-            gold_list = list()
-            extractions = {}
-            latencies = []
-            extr_cnt = 0
-            no_obj_cnt = 0
-            start_time = time.time()
-            for sen_idx, sen in tqdm(enumerate(gen_tsv_sens(stream))):
-                total += 1
-                words = [t[1] for t in sen]
-                sentence = " ".join(words)
-
-                # prediction: infer triplets for new sentences
-
-                # case 1: known sentence
-                # save id for gold data creation -> add triplet to previous sentence ID
-                # avoid double parsing/new entry in extractions for same sentence
-                # remark: sen_idx skipped -> from 0 to xy with gaps
-                if sentence == last_sent:
-                    sen_idx = last_id
-                # case 2: new sentence
-                else:
-                    last_sent = sentence
-                    last_id = sen_idx
-                    sent_cnt += 1
-                    skip = False
-
-                    # Step 1: add gold_dict to gold_list for previous sentence (but skip the very first)
-                    if total > 1:
-                        gold_dict = combine_args(gold_dict)
-                        gold_list.append(gold_dict)
-
-                    # Step 2: create new gold_dict for new sentence
-                    gold_dict = {
-                        "id": str(sen_idx),
-                        "sent": sentence,
-                        "tokens": words,
-                        "tuples": list(),
-                    }
-
-                    # Step 3: text parsing for new sentence (only if needed)
-                    text_to_graph = self.get_graphs(sentence, doc_id=str(sen_idx))
-                    if len(text_to_graph) > 1:
-                        logging.error(f"sentence split into two: {words}")
-                        logging.error(f"{sen_idx=}, {text_to_graph=}")
-                        logging.error("skipping")
-                        skipped += 1
-                        skip = True
-                        logging.error(f"{skipped=}, {total=}")
-                        # remove gold triplets for sentence as well
-                        rm_sen_idx.add(str(sen_idx))
-
-                    logging.debug(f"{sentence=}, {text_to_graph=}")
-
-                    # Step 4: generating triplets after conjunction decomposition (information_extraction)
-                    if not skip:
+                # loop through sentences
+                for key in gold.keys():
+                    for entry in gold[key]:
                         sent_start_time = time.time()
-                        try:
-                            # rare problems with sentence modifications need this check
-                            graph = text_to_graph[sentence]["main_edge"]
-                        except KeyError:
-                            logging.error(f"sentence not found after parsing")
-                            logging.error(f"{sen_idx=}, {sentence=}")
-                            logging.error("skipping")
-                            skipped += 1
-                            logging.error(f"{skipped=}, {total=}")
-                            # remove gold triplets for sentence as well
-                            rm_sen_idx.add(str(sen_idx))
-                        else:
-                            atom2word = text_to_graph[sentence]["atom2word"]
-                            logging.info("-" * 100)
-                            logging.info(
-                                f"START of information extraction for {sen_idx=}:"
-                            )
-                            logging.info(f"{sen_idx=}, {sentence=}")
-                            logging.info(f"{graph=}")
-                            information_extraction(
-                                extractions,
-                                graph,
-                                sen_idx,
-                                atom2word,
-                                self.patterns,
-                                max_extr,
-                            )
+                        sentence, sen_idx = entry["sent"], entry["id"]
+                        text_to_graph = self.get_graphs(sentence, doc_id=str(sen_idx))
+                        graph = text_to_graph[sentence]["main_edge"]
+                        atom2word = text_to_graph[sentence]["atom2word"]
+                        logging.info("-" * 100)
+                        logging.info(f"START of information extraction for {sen_idx=}:")
+                        logging.info(f"{sen_idx=}, {sentence=}")
+                        logging.info(f"{graph=}")
+                        information_extraction(
+                            extractions,
+                            graph,
+                            sen_idx,
+                            atom2word,
+                            self.patterns,
+                            max_extr,
+                        )
                         latency = time.time() - sent_start_time
                         latencies.append(latency)
 
-                # Step 5: gold data creation
-                # add multiple triplets to gold_dict for one sentence
-                temp = {k: defaultdict(list) for k in name_mapping.keys()}
-                for i, tok in enumerate(sen):
-                    label = tok[7].split("-")[0]
-                    if label == "O":
+        else:
+            # create dictionary with correctly ordered and named keys
+            name_mapping = {
+                "A0": "arg1",
+                "P": "rel",
+                "A1": "arg2",
+                "A2": "arg3",
+                "A3": "arg4",
+                "A4": "arg5",
+                "A5": "arg6",
+                "A6": "arg7",
+            }
+
+            with open(input) as stream:
+                total, skipped = 0, 0
+                last_sent = ""
+                sent_cnt = 0
+                rm_sen_idx = set()
+                gold_list = list()
+                no_obj_cnt = 0
+                start_time = time.time()
+                for sen_idx, sen in tqdm(enumerate(gen_tsv_sens(stream))):
+                    total += 1
+                    words = [t[1] for t in sen]
+                    sentence = " ".join(words)
+
+                    # prediction: infer triplets for new sentences
+
+                    # case 1: known sentence
+                    # save id for gold data creation -> add triplet to previous sentence ID
+                    # avoid double parsing/new entry in extractions for same sentence
+                    # remark: sen_idx skipped -> from 0 to xy with gaps
+                    if sentence == last_sent:
+                        sen_idx = last_id
+                    # case 2: new sentence
+                    else:
+                        last_sent = sentence
+                        last_id = sen_idx
+                        sent_cnt += 1
+                        skip = False
+
+                        # Step 1: add gold_dict to gold_list for previous sentence (but skip the very first)
+                        if total > 1:
+                            gold_dict = combine_args(gold_dict)
+                            gold_list.append(gold_dict)
+
+                        # Step 2: create new gold_dict for new sentence
+                        gold_dict = {
+                            "id": str(sen_idx),
+                            "sent": sentence,
+                            "tokens": words,
+                            "tuples": list(),
+                        }
+
+                        # Step 3: text parsing for new sentence (only if needed)
+                        text_to_graph = self.get_graphs(sentence, doc_id=str(sen_idx))
+                        if len(text_to_graph) > 1:
+                            logging.error(f"sentence split into two: {words}")
+                            logging.error(f"{sen_idx=}, {text_to_graph=}")
+                            logging.error("skipping")
+                            skipped += 1
+                            skip = True
+                            logging.error(f"{skipped=}, {total=}")
+                            # remove gold triplets for sentence as well
+                            rm_sen_idx.add(str(sen_idx))
+
+                        logging.debug(f"{sentence=}, {text_to_graph=}")
+
+                        # Step 4: generating triplets after conjunction decomposition (information_extraction)
+                        if not skip:
+                            sent_start_time = time.time()
+                            try:
+                                # rare problems with sentence modifications need this check
+                                graph = text_to_graph[sentence]["main_edge"]
+                            except KeyError:
+                                logging.error(f"sentence not found after parsing")
+                                logging.error(f"{sen_idx=}, {sentence=}")
+                                logging.error("skipping")
+                                skipped += 1
+                                logging.error(f"{skipped=}, {total=}")
+                                # remove gold triplets for sentence as well
+                                rm_sen_idx.add(str(sen_idx))
+                            else:
+                                atom2word = text_to_graph[sentence]["atom2word"]
+                                logging.info("-" * 100)
+                                logging.info(
+                                    f"START of information extraction for {sen_idx=}:"
+                                )
+                                logging.info(f"{sen_idx=}, {sentence=}")
+                                logging.info(f"{graph=}")
+                                information_extraction(
+                                    extractions,
+                                    graph,
+                                    sen_idx,
+                                    atom2word,
+                                    self.patterns,
+                                    max_extr,
+                                )
+                            latency = time.time() - sent_start_time
+                            latencies.append(latency)
+
+                    # Step 5: gold data creation
+                    # add multiple triplets to gold_dict for one sentence
+                    temp = {k: defaultdict(list) for k in name_mapping.keys()}
+                    for i, tok in enumerate(sen):
+                        label = tok[7].split("-")[0]
+                        if label == "O":
+                            continue
+                        # uncomment next elif clause if you want to ignore arg3+ annotations
+                        # elif label in ["A2", "A3", "A4", "A5", "A6"]:
+                        #     continue
+                        temp[label]["words"].append(tok[1])
+                        temp[label]["words_indexes"].append(i)
+
+                    # check if annotation misses objects (A1 and higher)
+                    if not temp["A1"]:
+                        logging.debug(f"skipping gold triplet without objects")
+                        logging.debug(f"{sen_idx=}, {temp=}")
+                        rm_sen_idx.add(str(sen_idx))
+                        no_obj_cnt += 1
                         continue
-                    # uncomment next elif clause if you want to ignore arg3+ annotations
-                    # elif label in ["A2", "A3", "A4", "A5", "A6"]:
-                    #     continue
-                    temp[label]["words"].append(tok[1])
-                    temp[label]["words_indexes"].append(i)
 
-                # check if annotation misses objects (A1 and higher)
-                if not temp["A1"]:
-                    logging.debug(f"skipping gold triplet without objects")
-                    logging.debug(f"{sen_idx=}, {temp=}")
-                    rm_sen_idx.add(str(sen_idx))
-                    no_obj_cnt += 1
-                    continue
+                    args_dict = {
+                        name_mapping.get(key, key): value
+                        for key, value in temp.items()
+                        if value
+                    }
+                    logging.debug(f"{sentence=}, {args_dict=}")
+                    gold_dict["tuples"].append(args_dict)
 
-                args_dict = {
-                    name_mapping.get(key, key): value
-                    for key, value in temp.items()
-                    if value
-                }
-                logging.debug(f"{sentence=}, {args_dict=}")
-                gold_dict["tuples"].append(args_dict)
+                # add gold_dict to gold_list for very last sentence
+                gold_dict = combine_args(gold_dict)
+                gold_list.append(gold_dict)
 
-            # add gold_dict to gold_list for very last sentence
-            gold_dict = combine_args(gold_dict)
-            gold_list.append(gold_dict)
+                # remove sentences
+                gold_list[:] = [d for d in gold_list if d["id"] not in rm_sen_idx]
 
-            # first extraction time measurement
-            extr_time = time.time() - start_time
+                # save gold dictionary to json file
+                save_dict = {input: gold_list}
+                with open(goldfile, "w", encoding="utf-8") as f:
+                    json.dump(save_dict, f, ensure_ascii=False, indent=4)
 
-            # take biggest set of overlapping matches per sentence
-            filtered_extr = {}
-            filtered_extr_cnt = 0
-            for k, v in extractions.items():
-                extr_cnt += len(v)
-                newv = combine_triplets(v)
-                filtered_extr[k] = newv
-                filtered_extr_cnt += len(newv)
+                print(f"Original sentence count: {sent_cnt}")
+                print(f"Removed sentence count (due to parsing errors): {skipped}")
+                print(f"Removed sentence count (total): {len(rm_sen_idx)}")
+                print(f"Triplets without object count: {no_obj_cnt}")
 
-            filtered_extr_time = time.time() - start_time
+        # first extraction time measurement
+        extr_time = time.time() - start_time
 
-            # save predictions to json file
-            output = input.split(".")[0] + "_pred.json"
-            with open(output, "w", encoding="utf-8") as f:
-                json.dump(filtered_extr, f, ensure_ascii=False, indent=4)
+        # take biggest set of overlapping matches per sentence
+        filtered_extr = {}
+        filtered_extr_cnt = 0
+        extr_cnt = 0
+        for k, v in extractions.items():
+            extr_cnt += len(v)
+            newv = combine_triplets(v)
+            filtered_extr[k] = newv
+            filtered_extr_cnt += len(newv)
+            #
+            # filtered_extr[k] = v
+            # filtered_extr_cnt += len(v)
 
-            # remove sentences because of LSOIE annotations with A0 and REL only
-            gold_list[:] = [d for d in gold_list if d["id"] not in rm_sen_idx]
+        filtered_extr_time = time.time() - start_time
 
-            # save gold dictionary to json file
-            save_dict = {input: gold_list}
-            output = input.split(".")[0] + "_gold.json"
-            with open(output, "w", encoding="utf-8") as f:
-                json.dump(save_dict, f, ensure_ascii=False, indent=4)
+        # save predictions to json file
+        output = input.split(".")[0] + "_pred.json"
+        with open(output, "w", encoding="utf-8") as f:
+            json.dump(filtered_extr, f, ensure_ascii=False, indent=4)
 
-            # efficiency metrics
-            raw_triplets_per_second = extr_cnt / extr_time
-            evaluated_triplets_per_second = filtered_extr_cnt / filtered_extr_time
-            avg_latency = sum(latencies) / len(latencies) if latencies else 0
+        # efficiency metrics
+        raw_triplets_per_second = extr_cnt / extr_time
+        evaluated_triplets_per_second = filtered_extr_cnt / filtered_extr_time
+        avg_latency = sum(latencies) / len(latencies) if latencies else 0
 
-            print(f"Original sentence count: {sent_cnt}")
-            print(f"Removed sentence count (due to parsing errors): {skipped}")
-            print(f"Removed sentence count (total): {len(rm_sen_idx)}")
-            print(f"Triplets without object count: {no_obj_cnt}")
-
-            return raw_triplets_per_second, evaluated_triplets_per_second, avg_latency
+        return raw_triplets_per_second, evaluated_triplets_per_second, avg_latency
 
 
 # function to combine arg3-arg6 to "arg3+" and print gold tuples in the console
@@ -883,7 +917,7 @@ def combine_triplets(entries):
         else:
             current_arg2 = grouped[group_key]["arg2"]
 
-            # check similarity for arg2
+            # check similarity for arg2 to existing arg2 and arg3+
             if not is_similar(current_arg2, entry["arg2"]):
                 if not any(
                     is_similar(entry["arg2"], existing)
@@ -891,17 +925,17 @@ def combine_triplets(entries):
                 ):
                     grouped[group_key]["arg3+"].append(entry["arg2"])
 
-            # check similarity for arg3+
+            # check similarity for arg3+ to existing arg2 and arg3+
             if "arg3+" in entry:
                 for new_arg in entry["arg3+"]:
-                    if not any(
+                    if not is_similar(new_arg, grouped[group_key]["arg2"]) and not any(
                         is_similar(new_arg, existing)
                         for existing in grouped[group_key]["arg3+"]
                     ):
                         grouped[group_key]["arg3+"].append(new_arg)
 
     # remove arg3+ if empty
-    for key, val in grouped.items():
+    for _, val in grouped.items():
         if not val["arg3+"]:
             del val["arg3+"]
 
