@@ -90,7 +90,7 @@ def sentence_match(gold, predicted):
                 elif key in ["arg1", "rel", "arg2"]:
                     logger.info(f"{key}: {' '.join(gt[key]['words'])}")
 
-            logger.info(f"with predicted tuple:")
+            logger.info(f"\nwith predicted tuple:")
             for key, value in pt.items():
                 if key == "arg3+":
                     logger.info("arg3+:")
@@ -101,8 +101,6 @@ def sentence_match(gold, predicted):
             logger.info("-" * 30)
             logger.info(f"exact match score: {exact_match_scores[i][j]}")
             logger.info(f"partial match score: {scores[i][j]}")
-            if scores[i][j]:
-                logger.info(f"partial match score: {scores[i][j]}")
             logger.info("-" * 30)
 
     # logger.info(f"exact match scores: {exact_match_scores}")
@@ -119,7 +117,6 @@ def aggregate_scores_greedily(scores):
     # them both, until nothing left matches. Each input square is a [prec, rec]
     # pair. Returns precision and recall as score-and-denominator pairs.
     matches = []
-    logger.debug(f"{scores=}")
     while True:
         max_s = 0
         gold, pred = None, None

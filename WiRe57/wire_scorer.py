@@ -1,47 +1,68 @@
 import argparse
 import json
 import logging
+import os
+
+logging.basicConfig(
+    format="%(message)s",
+    handlers=[
+        logging.StreamHandler(),  # To print logs to the console
+        logging.FileHandler("wire_scorer.log", mode="w"),  # To save logs to a file
+    ],
+)
+
+# logging.getLogger().setLevel(logging.INFO)
+
+
+def load_WiRe_annotations():
+    save_path = "WiRe57/WiRe57_343-manual-oie.json"
+    annotations = json.load(open(save_path))
+    return annotations
 
 
 def get_args():
     parser = argparse.ArgumentParser(description="")
-    parser.add_argument("-d", "--debug", action="store_true")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    parser.add_argument("-g", "--gold", required=True, default=None, type=str)
-    parser.add_argument("-p", "--pred", required=True, default=None, type=str)
+    parser.add_argument("-i", "--input", required=True, default=None, type=str)
     return parser.parse_args()
 
 
 def main():
     args = get_args()
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-        force=True,
-    )
-    if args.verbose:
-        logging.getLogger().setLevel(logging.INFO)
-    if args.debug:
-        logging.getLogger().setLevel(logging.DEBUG)
 
+    # load json file with results if it exists
+    json_file = "evaluation_results_wire57.json"
+    if os.path.exists(json_file):
+        with open(json_file, "r") as f:
+            try:
+                results_dict = json.load(f)
+            except json.JSONDecodeError:
+                results_dict = {}
+    else:
+        results_dict = {}
+
+    data = args.input
+    reference = (
+        load_WiRe_annotations()
+    )  # googledoc_manual_OIE_loader.load_WiRe_annotations()
     # dict of documents, each doc a list of sents with a "tuples" attribute, which is the list of reference tuples
-    reference = json.load(open(args.gold))
     gold = {s["id"]: s["tuples"] for doc in reference.values() for s in doc}
-    # TODO: remove ids from gold without prediction ?
-    all_predictions = json.load(open(args.pred))
+    # dict of lists of dicts
+    # [{'attrib/spec?': '', 'arg1': {'text': 'renewed U.S. protectionism triggering tit-for-tat, growth-stifling trade barriers', 'words': ['renewed', 'U.S.', 'protectionism', 'triggering', 'tit-for-tat', ',', 'growth-stifling', 'trade', 'barriers'], 'words_indexes': [4, 5, 6, 12, 13, 14, 15, 16, 17], 'dc_text': 'renewed U.S. protectionism triggering tit-for-tat, growth-stifling trade barriers', 'decorefed_words': ['renewed', 'U.S.', 'protectionism', 'triggering', 'tit-for-tat', ',', 'growth-stifling', 'trade', 'barriers'], 'decorefed_indexes': [4, 5, 6, 12, 13, 14, 15, 16, 17]}, 'rel': {'text': '[could trigger]', 'words': ['could', 'trigger'], 'words_indexes': ['inf', 'inf']}, 'arg2': {'text': 'trade barriers', 'words': ['trade', 'barriers'], 'words_indexes': [16, 17], 'dc_text': 'trade barriers', 'decorefed_words': ['trade', 'barriers'], 'decorefed_indexes': [16, 17]}, 'arg3+': []}, {'attrib/spec?': '', 'arg1': {'text': 'anger over Chinese exports triggering tit-for-tat, growth-stifling trade barriers', 'words': ['anger', 'over', 'Chinese', 'exports', 'triggering', 'tit-for-tat', ',', 'growth-stifling', 'trade', 'barriers'], 'words_indexes': [8, 9, 10, 11, 12, 13, 14, 15, 16, 17], 'dc_text': 'anger over Chinese exports triggering tit-for-tat, growth-stifling trade barriers', 'decorefed_words': ['anger', 'over', 'Chinese', 'exports', 'triggering', 'tit-for-tat', ',', 'growth-stifling', 'trade', 'barriers'], 'decorefed_indexes': [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]}, 'rel': {'text': '[could trigger]', 'words': ['could', 'trigger'], 'words_indexes': ['inf', 'inf']}, 'arg2': {'text': 'trade barriers', 'words': ['trade', 'barriers'], 'words_indexes': [16, 17], 'dc_text': 'trade barriers', 'decorefed_words': ['trade', 'barriers'], 'decorefed_indexes': [16, 17]}, 'arg3+': []}, {'attrib/spec?': '', 'arg1': {'text': 'trade barriers', 'words': ['trade', 'barriers'], 'words_indexes': [16, 17], 'dc_text': 'trade barriers', 'decorefed_words': ['trade', 'barriers'], 'decorefed_indexes': [16, 17]}, 'rel': {'text': '[stifle]', 'words': ['stifle'], 'words_indexes': ['inf']}, 'arg2': {'text': '[growth]', 'words': ['growth'], 'words_indexes': ['inf'], 'dc_text': '[growth]', 'decorefed_words': ['growth'], 'decorefed_indexes': ['inf']}, 'arg3+': []}]
+    # See the format of the reference in googledoc_manual_OIE_loader.py
+    all_predictions = json.load(open("WiRe57/" + data))
     predictions_by_OIE = split_tuples_by_extractor(gold.keys(), all_predictions)
     systems = predictions_by_OIE.keys()
 
     reports = {}
-    # TODO: remove for loop -> only one system for LSOIE data
+    result_per_system = {}
     for e in systems:
+        logging.info(f"--- Evaluating System {e} ---")
         report = ""
-        logging.info(f"Evaluating {e} system ...")
         metrics, raw_match_scores = eval_system(gold, predictions_by_OIE[e])
-        with open("raw_scores/" + e + "_prec_scores.dat", "w") as f:
-            f.write(str(raw_match_scores[0]))
-        with open("raw_scores/" + e + "_rec_scores.dat", "w") as f:
-            f.write(str(raw_match_scores[1]))
+        # with open("WiRe57/raw_scores/" + e + "_prec_scores.dat", "w") as f:
+        #     f.write(str(raw_match_scores[0]))
+        # with open("WiRe57/raw_scores/" + e + "_rec_scores.dat", "w") as f:
+        #     f.write(str(raw_match_scores[1]))
         prec, rec = metrics["precision"], metrics["recall"]
         f1_score = f1(prec, rec)
         exactmatch_prec = (
@@ -50,8 +71,6 @@ def main():
         exactmatch_rec = (
             metrics["exactmatches_recall"][0] / metrics["exactmatches_recall"][1]
         )
-        # weighted prec score, e.g. prec = 1, nr. of prediction tuples = 8 -> 12.5%
-        # weighted rec score, e.g. rec = 0.6, nr. of reference tuples = 4 -> 15%
         report += "System {} prec/rec/f1: {:.1%} {:.1%} {:.3f}".format(
             e, prec, rec, f1_score
         )
@@ -59,8 +78,7 @@ def main():
             e,
             metrics["precision_of_matches"],
             metrics["recall_of_matches"],
-            # metrics["non-matches"],
-            metrics["matches"],  # this seems to be incorrect -> 'non-matches' required?
+            metrics["matches"],
         )
         report += (
             "\n{} were exactly correct, out of {} predicted / the reference {}.".format(
@@ -73,26 +91,57 @@ def main():
             exactmatch_prec, exactmatch_rec, f1(exactmatch_prec, exactmatch_rec)
         )
         reports[f1_score] = report
+        result_per_system[e] = {
+            "total": {"precision": prec, "recall": rec, "f1_score": f1_score},
+            "matches_only": {
+                "precision": metrics["precision_of_matches"],
+                "recall": metrics["recall_of_matches"],
+                "nr_of_matches": metrics["matches"],
+            },
+            "exact_match": {
+                "correct": metrics["exactmatches_precision"][0],
+                "predicted": metrics["exactmatches_precision"][1],
+                "reference": metrics["exactmatches_recall"][1],
+                "precision": exactmatch_prec,
+                "recall": exactmatch_rec,
+                "f1_score": f1(exactmatch_prec, exactmatch_rec),
+            },
+        }
     sorted_reports = [a[1] for a in sorted(reports.items(), reverse=True)]
     print("\n" + "\n\n".join(sorted_reports))
+
+    results = {
+        "results": result_per_system["shg"],
+    }
+
+    # Append to existing key or create a new list
+    if data in results_dict:
+        results_dict[data].append(results)
+    else:
+        results_dict[data] = [results]
+
+    # Save the updated data back to the file
+    with open(json_file, "w") as f:
+        json.dump(results_dict, f, indent=4)
+
+    print(
+        f"Saved new results for '{data}'. Total evaluations stored: {len(results_dict[data])}"
+    )
 
 
 def eval_system(gold, predictions):
     results = {}
     # Get a manytuples-to-manytuples match-score for each sentence,
     # then gather the scores across sentences and compute the weighted-average
-    cnt = 0
     for s, reference_tuples in gold.items():
         predicted_tuples = predictions.get(s, [])
-        logging.info(f"Matching sentence {s}:")
+        logging.info(f"### sen_idx={s} ###")
         results[s] = sentence_match(reference_tuples, predicted_tuples)
+        logging.debug(f"{results[s]=}")
         # returns dict with
         # 'precision': [1.0, 8], 'recall': [0.6, 4],
         # 'precision_of_matches': [1.0], 'recall_of_matches': [0.6],
         # 'exact_match_precision': [0, 8], 'exact_match_recall': [0, 4]
-        cnt += 1
-        # if cnt == 1:
-        #     break
 
     prec_num, prec_denom = 0, 0
     rec_num, rec_denom = 0, 0
@@ -110,6 +159,10 @@ def eval_system(gold, predictions):
         exactmatches_recdenom += s["exact_match_recall"][1]
         tot_prec_of_matches += sum(s["precision_of_matches"])
         tot_rec_of_matches += sum(s["recall_of_matches"])
+    if prec_denom != exactmatches_precdenom:
+        logging.debug(f"{prec_denom=}, {exactmatches_precdenom=}")
+    if rec_denom != exactmatches_recdenom:
+        logging.debug(f"{rec_denom=}, {exactmatches_recdenom=}")
     precision_scores = [v for s in results.values() for v in s["precision_of_matches"]]
     recall_scores = [v for s in results.values() for v in s["recall_of_matches"]]
     raw_match_scores = [precision_scores, recall_scores]
@@ -161,23 +214,21 @@ def sentence_match(gold, predicted):
                     logging.info("arg3+:")
                     for arg in gt["arg3+"]:
                         logging.info(f"    - {' '.join(arg['words'])}")
-                else:
+                elif key in ["arg1", "rel", "arg2"]:
                     logging.info(f"{key}: {' '.join(gt[key]['words'])}")
 
             logging.info(f"with predicted tuple:")
             for key, value in pt.items():
                 if key == "arg3+":
+                    logging.info("arg3+:")
                     for arg in value:
-                        logging.info(f"{key}: {arg}")
+                        logging.info(f"    - {arg}")
                 elif key in ["arg1", "rel", "arg2"]:
                     logging.info(f"{key}: {value}")
             logging.info("-" * 30)
             logging.info(f"exact match score: {exact_match_scores[i][j]}")
             logging.info(f"partial match score: {scores[i][j]}")
             logging.info("-" * 30)
-
-    logging.info(f"exact match scores: {exact_match_scores}")
-    logging.info(f"partial match scores: {scores}")
     scoring_metrics = aggregate_scores_greedily(scores)
     exact_match_summary = aggregate_exact_matches(exact_match_scores)
     scoring_metrics["exact_match_precision"] = exact_match_summary["precision"]
@@ -194,21 +245,28 @@ def aggregate_scores_greedily(scores):
     # them both, until nothing left matches. Each input square is a [prec, rec]
     # pair. Returns precision and recall as score-and-denominator pairs.
     matches = []
+    logging.debug(f"{scores=}")
     while True:
         max_s = 0
         gold, pred = None, None
         for i, gold_ss in enumerate(scores):
+            logging.debug(f"{i=}, {gold_ss=}")
             if i in [m[0] for m in matches]:
+                logging.debug(f"row already taken")
                 # Those are already taken rows
                 continue
             for j, pred_s in enumerate(scores[i]):
+                logging.debug(f"{j=}, {pred_s=}")
                 if j in [m[1] for m in matches]:
+                    logging.debug(f"col already taken")
                     # Those are used columns
                     continue
                 if pred_s and f1(*pred_s) > max_s:
                     max_s = f1(*pred_s)
                     gold = i
                     pred = j
+                    logging.debug(f"new best score: {max_s}")
+                    logging.debug(f"best gold: {i}, best pred: {j}")
         if max_s == 0:
             break
         # save indices of best match for this sentence e.g. [[2, 4]]
@@ -224,7 +282,6 @@ def aggregate_scores_greedily(scores):
         "precision_of_matches": prec_scores,
         "recall_of_matches": rec_scores,
     }
-    # print(scoring_metrics)
     return scoring_metrics
 
 
@@ -280,14 +337,9 @@ def tuple_exact_match(t, gt):
             # print("Predicted '{}' is different from reference '{}'".format(t[part], ' '.join(gt[part]['words'])))
             return False
     if gt["arg3+"]:
-        # check if "arg3+" is available in t
         if not t.get("arg3+", False):
             return False
-        # added check if number of arg3+ arguments is equal
-        elif len(t["arg3+"]) != len(gt["arg3+"]):
-            return False
         for i, p in enumerate(gt["arg3+"]):
-            # check if every arg3+ element from gt is available in t
             if t["arg3+"][i] != " ".join(p["words"]):
                 return False
     return True
@@ -317,12 +369,18 @@ def tuple_match(t, gt):
     recall = [0, 0]  # 0 out of 0 reference words match
     # If, for each part, any word is the same as a reference word, then it's a match.
     for part in ["arg1", "rel", "arg2"]:
+        logging.info(f"{part=}")
         predicted_words = t[part].split()
         gold_words = gt[part]["words"]
         gold_indexes = gt[part]["words_indexes"]
         gold_num_realwords = sum([i != "inf" for i in gold_indexes], 0)
+        logging.info(f"{gold_num_realwords=}")
         gold_is_fully_inferred = all([i == "inf" for i in gold_indexes])
+        # added this info
+        if gold_is_fully_inferred:
+            logging.info("Gold tuple is fully inferred!")
         if not predicted_words:
+            logging.info("No prediction available!")
             if gold_words and not gold_is_fully_inferred:
                 return False
             else:
@@ -330,6 +388,7 @@ def tuple_match(t, gt):
         matching_words = sum(1 for w in predicted_words if w in gold_words)
         if matching_words == 0 and not gold_is_fully_inferred:
             return False  # t <-> gt is not a match
+        logging.info(f"{part}: {matching_words} matching words")
         precision[0] += matching_words
         precision[1] += len(predicted_words)
         # Currently this slightly penalises systems when the reference
@@ -349,6 +408,7 @@ def tuple_match(t, gt):
             recall[1] += gold_num_realwords
             # if gt has more arg3+ elements than t -> next if is passed
             # but number of reference words is updated for recall!
+            # checks the number of entries in the arg3+ list for the predicted tuple
             if t.get("arg3+", False) and len(t["arg3+"]) > i:
                 predicted_words = t["arg3+"][i].split()
                 matching_words = sum(1 for w in predicted_words if w in gold_words)
@@ -367,11 +427,6 @@ def split_tuples_by_extractor(gold, tuples):
     systems = sorted(list(set(t["extractor"] for st in tuples.values() for t in st)))
     predictions_by_OIE = {e: {} for e in systems}
     for s in gold:
-        # skip sentences (s) without predictions (tuples[s])
-        try:
-            tt = tuples[s]
-        except KeyError:
-            continue
         for t in tuples[s]:
             if s in predictions_by_OIE[t["extractor"]]:
                 predictions_by_OIE[t["extractor"]][s].append(t)

@@ -408,6 +408,7 @@ def merge_patterns(edge1, edge2):
 
 
 def apply_variable(edge, var_name, var_edge):
+    # TODO: remove_variables not working
     clean_edge = remove_variables(edge)
     if clean_edge == var_edge or (type(var_edge) == list and clean_edge in var_edge):
         return hedge(("var", clean_edge, var_name)), True
@@ -428,7 +429,6 @@ def apply_variable(edge, var_name, var_edge):
 def apply_variables(edge, variables):
     new_edge = edge
     for var_name, var_edge in variables.items():
-        logging.debug(f"{edge=}, {var_name=}, {var_edge=}")
         new_edge, found = apply_variable(new_edge, var_name, var_edge)
         if not found:
             return None

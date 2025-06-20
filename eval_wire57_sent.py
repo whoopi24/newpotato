@@ -5,16 +5,16 @@ import logging
 logging.basicConfig(
     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
     handlers=[
-        logging.StreamHandler(),  # To print logs to the console
-        logging.FileHandler("eval_wire57_sent.log", mode="w"),  # To save logs to a file
+        logging.StreamHandler(),
+        logging.FileHandler("eval_wire57_sent.log", mode="w"),
     ],
 )
 
 from rich.console import Console
 
-from newpotato.extractors.graphbrain_extractor_PC import combine_triplets
-from newpotato.hitl_marina import HITLManager
-from newpotato.modifications.oie_patterns import information_extraction
+from newpotato.extractors.graphbrain_extractor import combine_triplets
+from newpotato.hitl import HITLManager
+from newpotato.modifications.oie_evaluation import information_extraction
 
 console = Console()
 
@@ -28,11 +28,6 @@ def get_args():
 
 def main():
     args = get_args()
-    # logging.basicConfig(
-    #     level=logging.WARNING,
-    #     format="%(asctime)s : %(module)s (%(lineno)s) - %(levelname)s - %(message)s",
-    #     force=True,
-    # )
     logging.getLogger().setLevel(logging.WARNING)
     if args.verbose:
         logging.getLogger().setLevel(logging.INFO)
@@ -45,25 +40,24 @@ def main():
     if hitl.extractor.patterns is None:
         console.print("[bold cyan]Enter path to patterns file:[/bold cyan]")
         fn = input("> ")
+        console.print("[bold cyan]Enter number of patterns:[/bold cyan]")
+        p_cnt = input("> ")
+        console.print(
+            "[bold cyan]Enter maximal number of extractions per decomposed hyperedge:[/bold cyan]"
+        )
+        max_extr = input("> ")
+
         try:
-            hitl.extractor.load_patterns(fn)
+            hitl.extractor.load_patterns(fn, N=int(p_cnt))
         except FileNotFoundError:
             console.print(f"[bold red]No such file or directory: {fn}[/bold red]")
 
     # Directories & files
     DIR = "WiRe57"
     EXTR_MANUAL = "WiRe57_343-manual-oie.json"
-    EXTR_BEFORE = (
-        "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
-        "reverb_props-export.json"
-    )
-    EXTR_AFTER = (
-        "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
-        "reverb_props_shg-export.json"
-    )
+    EXTR_AFTER = fn.split(".")[0] + "_" + p_cnt + "_" + max_extr + ".json"
 
     manual = json.load(open("{}/{}".format(DIR, EXTR_MANUAL)))
-    extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
     total, skipped = 0, 0
     extractions = {}
 
@@ -103,24 +97,29 @@ def main():
                     logging.info(f"START of information extraction for {sen_idx=}:")
                     logging.info(f"{sen_idx=}, {sentence=}")
                     logging.info(f"{graph=}")
+                    logging.info(f"{atom2word=}")
                     information_extraction(
                         extractions,
                         graph,
                         sen_idx,
                         atom2word,
                         hitl.extractor.patterns,
-                        max_extr=3,
+                        max_extr=max_extr,
                     )
 
     # take biggest set of overlapping matches per sentence and
     # add predictions to the results of the other OIE systems
     for k, v in extractions.items():
         newv = combine_triplets(v)
-        extr[k].append(newv[0])
+        extractions[k].append(newv[0])
+
+    for k, v in extractions.items():
+        print(k, v)
+        extractions[k].append(v[0])
 
     # save predictions to json file
     with open("{}/{}".format(DIR, EXTR_AFTER), "w", encoding="utf-8") as f:
-        json.dump(extr, f, ensure_ascii=False, indent=4)
+        json.dump(extractions, f, ensure_ascii=False, indent=4)
 
 
 if __name__ == "__main__":
