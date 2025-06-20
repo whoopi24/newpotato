@@ -10,7 +10,7 @@ def get_extractor_cls(e_type):
 
         return GraphBasedExtractor
     elif e_type == "graphbrain":
-        from newpotato.extractors.graphbrain_extractor_PC import GraphbrainExtractor
+        from newpotato.extractors.graphbrain_extractor import GraphbrainExtractor
 
         return GraphbrainExtractor
     else:

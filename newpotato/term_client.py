@@ -17,7 +17,7 @@ from tqdm import tqdm
 
 # from newpotato.evaluate.eval_hitl import HITLEvaluator
 from newpotato.evaluate.wire_functions import *
-from newpotato.hitl_marina import HITLManager
+from newpotato.hitl import HITLManager
 
 # from newpotato.modifications.oie_patterns import *
 from newpotato.utils import get_triplets_from_user, print_tokens
@@ -379,7 +379,7 @@ class NPTerminalClient:
         while True:
             self.print_status()
             console.print(
-                "[bold cyan]Choose an action:\n\t(U)pload\n\t(G)raphs\n\t(A)nnotate\n\t(R)ules\n\t(S)uggest\n\t(I)nference\n\t(E)valuate\n\t(L)oad\n\t(W)rite\n\t(P)atterns\n\t(C)lear\n\t(Q)uit\n\t(H)elp\n\t(O)pen Information Extraction[/bold cyan]"
+                "[bold cyan]Choose an action:\n\t(U)pload\n\t(G)raphs\n\t(A)nnotate\n\t(R)ules\n\t(S)uggest\n\t(I)nference\n\t(E)valuate\n\t(L)oad\n\t(W)rite\n\t(P)atterns\n\t(C)lear\n\t(Q)uit\n\t(H)elp[/bold cyan]"
             )
             choice = input("> ").upper()
             if choice in ("S", "I") and not self.hitl.extractor.is_trained:

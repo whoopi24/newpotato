@@ -18,7 +18,7 @@ from tqdm import tqdm
 from tuw_nlp.text.utils import gen_tsv_sens
 
 from newpotato.datatypes import Triplet
-from newpotato.hitl_marina import HITLManager
+from newpotato.hitl import HITLManager
 
 console = Console()
 
