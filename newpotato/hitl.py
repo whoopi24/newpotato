@@ -1,7 +1,5 @@
 import json
 import logging
-import os
-import pickle
 import random
 from collections import defaultdict
 from dataclasses import dataclass
@@ -11,6 +9,7 @@ from tuw_nlp.text.utils import tuple_if_list
 
 from newpotato.datatypes import Triplet
 from newpotato.extractors.extractor import Extractor
+from newpotato.extractors.graphbrain_extractor import GraphbrainMappedTriplet
 
 
 @dataclass
@@ -52,16 +51,28 @@ class HITLManager:
         self.extractor = Extractor.from_json(extractor_data)
 
     def load_triplets(self, triplet_data, oracle=False):
-        text_to_triplets = {
-            tuple_if_list(item["text"]): [
-                (
-                    Triplet.from_json(triplet[0]),
-                    triplet[1],
-                )
-                for triplet in item["triplets"]
-            ]
-            for item in triplet_data
-        }
+        if self.extractor_type == "graphbrain":
+            text_to_triplets = {
+                tuple_if_list(item["text"]): [
+                    (
+                        GraphbrainMappedTriplet.from_json(triplet[0]),
+                        triplet[1],
+                    )
+                    for triplet in item["triplets"]
+                ]
+                for item in triplet_data
+            }
+        else:
+            text_to_triplets = {
+                tuple_if_list(item["text"]): [
+                    (
+                        Triplet.from_json(triplet[0]),
+                        triplet[1],
+                    )
+                    for triplet in item["triplets"]
+                ]
+                for item in triplet_data
+            }
 
         if oracle:
             self.oracle = text_to_triplets
@@ -106,7 +117,9 @@ class HITLManager:
                 {
                     "text": text,
                     "triplets": [
-                        (triplet[0].to_json(), triplet[1]) for triplet in triplets
+                        (triplet[0].to_json(), triplet[1])
+                        for triplet in triplets
+                        if triplet[0] != False
                     ],
                 }
                 for text, triplets in self.text_to_triplets.items()
