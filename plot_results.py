@@ -90,7 +90,6 @@ for input_file, evaluations in data_dict.items():
     f1_scores = []
     best_f1 = 0
     best_f1_point = None
-    jitter_strength = 0.001
     redundant = False
 
     # count occurrences of (precision, recall) pairs for skipping/jittering
@@ -126,8 +125,13 @@ for input_file, evaluations in data_dict.items():
         elif value_counts[(precision, recall)] > 1:
             redundant = True
 
+        # store remark if available
+        if "remark" in eval_data:
+            remark = eval_data["remark"]
+            remarks.append((precision, recall, remark))
+
         # save best f1 score
-        if f1_score > best_f1:
+        if remark != "bi" and f1_score > best_f1:
             best_f1 = f1_score
             best_f1_point = (recall, precision)
 
@@ -142,12 +146,8 @@ for input_file, evaluations in data_dict.items():
             c=[pattern_to_color[num_patterns]],
             edgecolors=[extr_to_color[num_extractions]],
             linewidths=1.5,
-            alpha=0.8,
+            alpha=0.7,
         )
-
-        # store remark if available
-        if "remark" in eval_data:
-            remarks.append((precision, recall, eval_data["remark"]))
 
     if not precision_values:
         print(f"Skipping {input_file}: No valid precision-recall data.")
@@ -157,7 +157,7 @@ for input_file, evaluations in data_dict.items():
 
     # highlight best f1 point
     plt.annotate(
-        "max f1",
+        "f1",
         best_f1_point,
         xytext=(best_f1_point[0], best_f1_point[1] - arrow_length),
         arrowprops=dict(arrowstyle="-", linewidth=0.5),
@@ -189,15 +189,6 @@ for input_file, evaluations in data_dict.items():
     plt.ylabel("precision")
     plt.title(f"Precision-Recall Plot for {input_file}")
 
-    # colorbar for patterns
-    cb1 = plt.colorbar(
-        plt.cm.ScalarMappable(norm=pattern_norm, cmap=pattern_cmap),
-        ax=plt.gca(),
-        ticks=np.arange(n_patterns) + 0.5,
-    )
-    cb1.set_ticklabels(unique_patterns)
-    cb1.set_label("number of patterns (inner circle)")
-
     # colorbar for extractions
     cb2 = plt.colorbar(
         plt.cm.ScalarMappable(norm=extr_norm, cmap=extr_cmap),
@@ -206,6 +197,15 @@ for input_file, evaluations in data_dict.items():
     )
     cb2.set_ticklabels(unique_extr)
     cb2.set_label("max. number of extractions (outer circle)")
+
+    # colorbar for patterns
+    cb1 = plt.colorbar(
+        plt.cm.ScalarMappable(norm=pattern_norm, cmap=pattern_cmap),
+        ax=plt.gca(),
+        ticks=np.arange(n_patterns) + 0.5,
+    )
+    cb1.set_ticklabels(unique_patterns)
+    cb1.set_label("number of patterns (inner circle)")
 
     filename = f"prec_rec_{input_file.split('.')[0]}.png"
     plt.savefig(filename, dpi=600, bbox_inches="tight")  # , transparent=True for slides
