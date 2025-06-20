@@ -1,11 +1,18 @@
-import inspect
 import json
+import logging
+
+logging.basicConfig(
+    format="%(message)s",
+    handlers=[
+        logging.StreamHandler(),  # To print logs to the console
+        logging.FileHandler("original_openie.log", mode="w"),  # To save logs to a file
+    ],
+)
 
 import graphbrain.patterns as pattrn
-from graphbrain import *
-from graphbrain.hyperedge import UniqueAtom, hedge
-from graphbrain.parsers import *
-from graphbrain.utils.conjunctions import conjunctions_decomposition, predicate
+from graphbrain.hyperedge import hedge
+from graphbrain.parsers import create_parser, edge_text
+from graphbrain.utils.conjunctions import conjunctions_decomposition
 
 # The 10 patterns that are shown in Table 4 and discussed in section 4.2.
 # PATTERNS = [
@@ -38,19 +45,6 @@ PATTERNS = [
     "(REL1/P.{px} ARG1/C (REL2/T ARG2))",
     "(REL1/P.{sc} ARG1/C (REL3/B REL2/C ARG2/C))",
 ]
-
-
-# Directories & files
-DIR = "WiRe57/data"
-EXTR_MANUAL = "WiRe57_343-manual-oie.json"
-EXTR_BEFORE = (
-    "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
-    "reverb_props-export.json"
-)
-EXTR_AFTER = (
-    "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
-    "reverb_props_shg-export.json"
-)
 
 
 def label(edge, atom2word):
@@ -141,7 +135,13 @@ def main_conjunction(edge):
 
 
 def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
-    data = {"arg1": arg1, "rel": rel, "arg2": arg2, "extractor": "shg", "score": 1.0}
+    data = {
+        "arg1": arg1,
+        "rel": rel,
+        "arg2": arg2,
+        "extractor": "shg-org",
+        "score": 1.0,
+    }
 
     if len(arg3) > 0:
         data["arg3+"] = arg3
@@ -150,18 +150,26 @@ def add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3):
 
     if extraction not in extractions:
         extractions[extraction] = {"data": data, "sent_id": sent_id}
+        logging.debug(f"{arg1=}, {rel=}, {arg2=}")
     elif len(arg3) > 0:
         if "arg3+" in extractions[extraction]["data"]:
             extractions[extraction]["data"]["arg3+"] += arg3
+            logging.debug(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
         else:
             extractions[extraction]["data"]["arg3+"] = arg3
+            logging.debug(f"{arg1=}, {rel=}, {arg2=}, {arg3=}")
 
 
 def find_tuples(extractions, edge, sent_id, atom2word):
     for pattern in PATTERNS:
         for match in pattrn.match_pattern(edge, pattern):
-            arg1 = match["ARG1"]
-            arg2 = match["ARG2"]
+            logging.debug(f"{pattern=}")
+            logging.debug(f"{match=}")
+            try:
+                arg1 = match["ARG1"]
+                arg2 = match["ARG2"]
+            except KeyError:
+                continue
             if "ARG3..." in match:
                 arg3 = [label(match["ARG3..."], atom2word)]
             else:
@@ -179,7 +187,6 @@ def find_tuples(extractions, edge, sent_id, atom2word):
 
             arg1 = label(arg1, atom2word)
             arg2 = label(arg2, atom2word)
-
             add_to_extractions(extractions, edge, sent_id, arg1, rel, arg2, arg3)
 
 
@@ -188,38 +195,65 @@ def information_extraction(extractions, main_edge, sent_id, atom2word):
         return
     if main_edge.type()[0] == "R":
         # edges = conjunctions_resolution(main_edge, atom2word)
-        edges = conjunctions_decomposition(main_edge, concepts=True)
-        for edge in edges:
-            find_tuples(extractions, main_conjunction(edge), sent_id, atom2word)
+        try:
+            edges = conjunctions_decomposition(main_edge, concepts=True)
+            for edge in edges:
+                logging.debug(f"find_tuples() for {main_conjunction(edge)=}")
+                find_tuples(extractions, main_conjunction(edge), sent_id, atom2word)
+        except IndexError:
+            # e.g. IndexError: tuple index out of range: if edge[0].type() == 'J' and edge.mtype() != 'C':
+            logging.error(
+                f"Issue with conjunction decomposition for one of the subedges of {main_edge=}"
+            )
     for edge in main_edge:
         information_extraction(extractions, edge, sent_id, atom2word)
 
 
-def parse_sent(extractions, parser, sent, sent_id):
-    parse_result = parser.parse(sent)
+def parse_sent(extractions, parser, sentence, sen_idx):
+    parse_result = parser.parse(sentence)
     for parse in parse_result["parses"]:
         main_edge = parse["main_edge"]
         atom2word = parse["atom2word"]
         if main_edge:
-            information_extraction(extractions, main_edge, sent_id, atom2word)
+            logging.info("-" * 100)
+            logging.info(f"START of information extraction for {sen_idx=}:")
+            logging.info(f"{sen_idx=}, {sentence=}")
+            logging.info(f"graph={main_edge}")
+            logging.info(f"{atom2word=}")
+            information_extraction(extractions, main_edge, sen_idx, atom2word)
 
 
 if __name__ == "__main__":
     parser = create_parser(lang="en", corefs=False)
     extractions = {}
 
-    parse_sent(extractions, parser, "Mary likes astronomy and plays football.", "MY1")
+    # Directories & files
+    # DIR = "WiRe57"
+    # EXTR_MANUAL = "WiRe57_343-manual-oie.json"
+    # EXTR_BEFORE = (
+    #     "WiRe57_extractions_by_ollie_clausie_openie_stanford_minie_"
+    #     "reverb_props-export.json"
+    # )
+    # EXTR_AFTER = "original_sh.json"
 
     # manual = json.load(open("{}/{}".format(DIR, EXTR_MANUAL)))
     # extr = json.load(open("{}/{}".format(DIR, EXTR_BEFORE)))
 
-    # for key in manual:
-    #     print(key)
-    #     for case in manual[key]:
-    #         parse_sent(extractions, parser, case["sent"], case["id"])
+    # logging.getLogger().setLevel(logging.DEBUG)
 
-    # for _, extraction in extractions.items():
-    #     extr[extraction["sent_id"]].append(extraction["data"])
+    input = "lsoie_science_test.conll"
+    goldfile = input.split(".")[0] + "_gold.json"
+    with open(goldfile, "r") as gfile:
+        manual = json.load(gfile)
+        extr = {entry["id"]: [] for entry in manual[input]}
 
-    # with open("{}/{}".format(DIR, EXTR_AFTER), "w", encoding="utf-8") as f:
-    #     json.dump(extr, f, ensure_ascii=False, indent=4)
+        for key in manual:
+            for case in manual[key]:
+                parse_sent(extractions, parser, case["sent"], case["id"])
+
+    for _, extraction in extractions.items():
+        extr[extraction["sent_id"]].append(extraction["data"])
+
+    outputfile = "sh_" + input.split(".")[0] + "_pred.json"
+    with open(outputfile, "w", encoding="utf-8") as f:
+        json.dump(extr, f, ensure_ascii=False, indent=4)
